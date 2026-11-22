@@ -1,6 +1,42 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeRose, toSeries, sectorOf, niceMax, isRaining } from '../pt2vhf-wind-rose-card.js';
+import { computeRose, toSeries, sectorOf, niceMax, isRaining, density } from '../pt2vhf-wind-rose-card.js';
+
+const argmax = (g) => g.reduce((b, v, i) => (v > g[b] ? i : b), 0);
+
+test('density: single point peaks at its own cell, normalised to 1, symmetric', () => {
+  const n = 40;
+  const g = density([[0.525, -0.475]], n, 0.1); // centre of cell (30, 10)
+  const k = argmax(g);
+  const [i, j] = [k % n, Math.floor(k / n)];
+  assert.equal(g[k], 1);
+  assert.deepEqual([i, j], [30, 10]);
+  assert.ok(Math.abs(g[j * n + i - 3] - g[j * n + i + 3]) < 1e-6);
+  assert.ok(Math.abs(g[(j - 3) * n + i] - g[(j + 3) * n + i]) < 1e-6);
+  assert.equal(g[0], 0); // far corner untouched (kernel cut-off)
+});
+
+test('density: points either side of north merge into one peak on the north axis', () => {
+  const n = 40;
+  const r = computeRose([{ t: 0, v: 5 }], [{ t: 0, v: 355 }, { t: H / 2, v: 5 }], { start, end, maxSpeed: 10 });
+  const g = density(r.points, n, 0.08);
+  const k = argmax(g);
+  const x = ((k % n) + 0.5) * (2 / n) - 1;
+  const y = (Math.floor(k / n) + 0.5) * (2 / n) - 1;
+  assert.ok(Math.abs(x) <= 2 / n, `peak x ${x}`);
+  assert.ok(y < -0.4 && y > -0.6, `peak y ${y}`);
+});
+
+test('density: empty input gives an all-zero grid', () => {
+  assert.ok(density([], 10, 0.1).every((v) => v === 0));
+});
+
+test('computeRose exposes non-calm points in unit-disc x/y (north = -y)', () => {
+  const r = computeRose([{ t: 0, v: 5 }], [{ t: 0, v: 90 }], { start, end, maxSpeed: 10 });
+  assert.equal(r.points.length, r.total);
+  const [x, y] = r.points[0];
+  assert.ok(Math.abs(x - 0.5) < 1e-9 && Math.abs(y) < 1e-9);
+});
 
 test('isRaining accepts binary "on" and positive numbers only', () => {
   assert.equal(isRaining({ state: 'on' }), true);

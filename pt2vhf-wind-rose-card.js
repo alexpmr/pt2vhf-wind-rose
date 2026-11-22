@@ -4,7 +4,7 @@
  * comes FROM, distance from the centre = speed, colour = how much time it blew there.
  * https://github.com/alexpmr/pt2vhf-wind-rose
  */
-const VERSION = '0.3.0';
+const VERSION = '0.4.0';
 const TAG = 'pt2vhf-wind-rose-card';
 
 const STR = {
@@ -24,7 +24,8 @@ const STR = {
 
 // Sequential palette (low → high time share). Readable on light and dark themes.
 const STOPS = ['#2b4c9b', '#3e8fc4', '#5cc8a8', '#c6e05a', '#f6b73c', '#e8553e'];
-const NICE = [4, 6, 8, 10, 12, 15, 20, 25, 30, 40, 50, 60, 80, 100, 120, 150, 200];
+const HEAT_GRID = 96; // density grid resolution (cells per side)
+const NICE =[4, 6, 8, 10, 12, 15, 20, 25, 30, 40, 50, 60, 80, 100, 120, 150, 200];
 
 /** History rows ({s, lu|lc} in seconds) → sorted [{t ms, v number|NaN}]. */
 export function toSeries(rows) {
@@ -74,11 +75,15 @@ export function computeRose(speed, dir, { start, end, sectors = 16, rings = 5, m
   const max = maxSpeed > 0 ? maxSpeed : niceMax(Math.max(peak, atLeast, 1));
   const counts = Array.from({ length: sectors }, () => new Array(rings).fill(0));
   const bySector = new Array(sectors).fill(0);
+  const points = [];
   let calmN = 0;
   let sum = 0;
   for (const [s, d] of samples) {
     sum += s;
     if (s < calm) { calmN++; continue; }
+    const r = Math.min(1, s / max);
+    const rad = (d * Math.PI) / 180;
+    points.push([r * Math.sin(rad), -r * Math.cos(rad)]);
     const a = sectorOf(d, sectors);
     counts[a][Math.min(rings - 1, Math.floor((s / max) * rings))]++;
     bySector[a]++;
@@ -86,36 +91,71 @@ export function computeRose(speed, dir, { start, end, sectors = 16, rings = 5, m
   const total = samples.length;
   const best = bySector.indexOf(Math.max(...bySector));
   return {
-    counts, total, max, peak,
+    counts, total, max, peak, points,
     calm: total ? calmN / total : 0,
     avg: total ? sum / total : 0,
     prevailing: total > calmN ? best : -1,
   };
 }
 
-function lerpColor(f) {
+/**
+ * Gaussian kernel density of unit-disc points on an n×n grid spanning [-1, 1]²
+ * (row-major, row 0 = top). Normalised so the densest cell is 1. Working in x/y
+ * means no sector or ring edges, and directions wrap around north naturally.
+ */
+export function density(points, n = 96, sigma = 0.08) {
+  const g = new Float32Array(n * n);
+  const cell = 2 / n;
+  const reach = Math.ceil((3 * sigma) / cell);
+  const inv = 1 / (2 * sigma * sigma);
+  for (const [x, y] of points) {
+    const ci = Math.floor((x + 1) / cell);
+    const cj = Math.floor((y + 1) / cell);
+    for (let j = Math.max(0, cj - reach); j <= Math.min(n - 1, cj + reach); j++) {
+      const dy = (j + 0.5) * cell - 1 - y;
+      for (let i = Math.max(0, ci - reach); i <= Math.min(n - 1, ci + reach); i++) {
+        const dx = (i + 0.5) * cell - 1 - x;
+        g[j * n + i] += Math.exp(-(dx * dx + dy * dy) * inv);
+      }
+    }
+  }
+  let top = 0;
+  for (const v of g) if (v > top) top = v;
+  if (top > 0) for (let k = 0; k < g.length; k++) g[k] /= top;
+  return g;
+}
+
+function rgbAt(f) {
   const x = Math.min(1, Math.max(0, f)) * (STOPS.length - 1);
   const i = Math.min(STOPS.length - 2, Math.floor(x));
   const t = x - i;
   const a = parseInt(STOPS[i].slice(1), 16);
   const b = parseInt(STOPS[i + 1].slice(1), 16);
   const ch = (sh) => Math.round(((a >> sh) & 255) * (1 - t) + ((b >> sh) & 255) * t);
-  return `rgb(${ch(16)},${ch(8)},${ch(0)})`;
+  return [ch(16), ch(8), ch(0)];
+}
+
+/** Density grid → PNG data URL; alpha fades with density so the edges are soft. */
+function heatImage(g, n) {
+  const cv = document.createElement('canvas');
+  cv.width = n;
+  cv.height = n;
+  const ctx = cv.getContext('2d');
+  const img = ctx.createImageData(n, n);
+  for (let k = 0; k < g.length; k++) {
+    const f = g[k];
+    if (f < 0.005) continue;
+    const [r, gg, b] = rgbAt(f);
+    img.data.set([r, gg, b, Math.round(Math.min(1, f * 2.5) * 242)], k * 4);
+  }
+  ctx.putImageData(img, 0, 0);
+  return cv.toDataURL();
 }
 
 const pt = (r, deg) => {
   const a = (deg * Math.PI) / 180;
   return [+(r * Math.sin(a)).toFixed(2), +(-r * Math.cos(a)).toFixed(2)];
 };
-
-function cellPath(r0, r1, a0, a1) {
-  const [x0, y0] = pt(r1, a0);
-  const [x1, y1] = pt(r1, a1);
-  const [x2, y2] = pt(r0, a1);
-  const [x3, y3] = pt(r0, a0);
-  if (r0 === 0) return `M0 0L${x0} ${y0}A${r1} ${r1} 0 0 1 ${x1} ${y1}Z`;
-  return `M${x0} ${y0}A${r1} ${r1} 0 0 1 ${x1} ${y1}L${x2} ${y2}A${r0} ${r0} 0 0 0 ${x3} ${y3}Z`;
-}
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const Base = globalThis.HTMLElement ?? class {};
@@ -206,6 +246,9 @@ class WindRoseCard extends Base {
         // Auto scale also fits the current speed and gust, so their markers stay inside the rose.
         atLeast: Math.max(0, ...[c.entity, c.gust_entity].map((id) => parseFloat(this._hass.states[id]?.state)).filter(Number.isFinite)),
       });
+      // The heat image is built once per history refresh, not on every state update.
+      this._heat = this._rose.points.length
+        ? heatImage(density(this._rose.points, HEAT_GRID, (c.smooth ?? 8) / 100), HEAT_GRID) : '';
       this._error = null;
     } catch (e) {
       this._error = e?.message || String(e);
@@ -248,16 +291,9 @@ class WindRoseCard extends Base {
     const rr = (v) => Math.min(R, (Math.max(0, v) / max) * R);
     const dirName = (d) => L.dirs[sectorOf(d, 16)];
 
-    let cells = '';
-    if (rose?.total) {
-      const top = Math.max(1, ...rose.counts.flat());
-      rose.counts.forEach((ring, a) => ring.forEach((n, r) => {
-        if (!n) return;
-        const f = n / top;
-        cells += `<path d="${cellPath((R * r) / c.rings, (R * (r + 1)) / c.rings, a * step - step / 2, a * step + step / 2)}"
-          fill="${lerpColor(f)}" fill-opacity="${(0.2 + 0.8 * f).toFixed(2)}"/>`;
-      }));
-    }
+    // The grid spans [-1, 1]² of the unit disc, i.e. exactly the rose's bounding square.
+    const heat = this._heat
+      ? `<image href="${this._heat}" x="${-R}" y="${-R}" width="${2 * R}" height="${2 * R}" preserveAspectRatio="none"/>` : '';
 
     let grid = '';
     for (let r = 1; r <= c.rings; r++) grid += `<circle r="${(R * r) / c.rings}"/>`;
@@ -331,10 +367,9 @@ class WindRoseCard extends Base {
   <svg viewBox="-100 -100 200 200" role="img" aria-label="${esc(`${big} ${unit} ${Number.isFinite(dir) ? dirName(dir) : ''}`)}">
     ${this._error ? `<title>${esc(this._error)}</title>` : ''}
     <defs>
-      <filter id="soft" x="-10%" y="-10%" width="120%" height="120%"><feGaussianBlur stdDeviation="${c.smooth ?? 2}"/></filter>
       <clipPath id="disc"><circle r="${R}"/></clipPath>
     </defs>
-    <g clip-path="url(#disc)"><g filter="url(#soft)">${cells}</g></g>
+    <g clip-path="url(#disc)">${heat}</g>
     <g class="grid">${grid}</g>
     ${labels}${scale}${marker}${corners}
   </svg>

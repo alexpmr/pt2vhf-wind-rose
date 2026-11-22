@@ -4,7 +4,7 @@ A compact Home Assistant Lovelace card that shows **where the wind is coming fro
 
 ![PT2VHF Wind Rose in dark and light themes](images/preview.png)
 
-The rose is a polar heat map:
+The rose is a continuous polar heat map (a smooth density of every sample, with no sector or ring edges):
 
 - **angle** = direction the wind comes *from* (meteorological convention)
 - **distance from the centre** = speed (calm in the middle, strong at the rim)
@@ -45,14 +45,14 @@ hours: 1                             # history window (default 1)
 | `gust_entity` | — | Gust sensor (optional). |
 | `rain_entity` | — | Rain sensor (optional): a `binary_sensor` (`on`) or a numeric rate/amount (> 0). Shows a "rain" note only while it rains. |
 | `tap_action` | `more-info` | Standard Home Assistant action on tap (`more-info` of the speed sensor by default, `navigate`, `none`, …). |
-| `name` | — | Title above the values. |
+| `name` | Wind | Label of the speed corner. |
 | `hours` | `1` | Window of history used for the heat map. |
 | `max_speed` | auto | Speed at the rim. Auto picks a round value above the window's peak. |
-| `sectors` | `16` | Direction bins: 8, 16 or 32. |
-| `rings` | `5` | Speed bins from centre to rim. |
-| `calm` | `0.5` | Speeds below this count as calm (not drawn, shown as %). |
+| `sectors` | `16` | Direction bins used for the prevailing direction: 8, 16 or 32. |
+| `rings` | `5` | Number of speed circles drawn on the grid. |
+| `calm` | `0.5` | Speeds below this count as calm and are left out of the heat map. |
 | `max_width` | `380` | Maximum size of the rose in px on wide cards. |
-| `smooth` | `2` | Blur of the heat map (0 = sharp cells). |
+| `smooth` | `8` | Spread of each sample in the heat map, in % of the radius (lower = more detail, higher = softer). |
 | `refresh` | `60` | Seconds between history reloads. |
 
 The card reads history through the recorder (`history/history_during_period`), so both sensors must be recorded. Direction sensors that report text (e.g. `NW`) are not supported — use a numeric degree sensor.
@@ -60,7 +60,7 @@ The card reads history through the recorder (`history/history_during_period`), s
 ## Development
 
 ```sh
-node --test test/*.test.mjs   # unit tests for the binning math
+node --test test/*.test.mjs   # unit tests for the rose and density math
 ```
 
 `demo/index.html` renders the card with a simulated `hass` object; serve the folder with any static server and open it.

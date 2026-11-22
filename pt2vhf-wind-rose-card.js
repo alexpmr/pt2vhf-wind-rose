@@ -4,7 +4,7 @@
  * comes FROM, distance from the centre = speed, colour = how much time it blew there.
  * https://github.com/alexpmr/pt2vhf-wind-rose
  */
-const VERSION = '0.7.1';
+const VERSION = '0.8.0';
 const TAG = 'pt2vhf-wind-rose-card';
 
 const STR = {
@@ -279,7 +279,7 @@ export function pointerSvg(style, dir, R, { guide = true } = {}) {
 const LABELS = {
   entity: 'Wind speed', direction_entity: 'Wind direction (degrees)', gust_entity: 'Gust', rain_entity: 'Rain',
   name: 'Name', window: 'Heat-map window', direction_offset: 'Rotate rose (display only)', max_speed: 'Max speed (0 = auto)',
-  heat_mode: 'Heat-map style', plume_width: 'Plume thickness', plume_fade: 'Plume tip fade', smooth: 'Spot softness', pointer: 'Pointer style', pointer_color: 'Pointer colour (CSS)',
+  heat_mode: 'Heat-map style', heat_direction: 'Heat-map points', plume_width: 'Plume thickness', plume_fade: 'Plume tip fade', smooth: 'Spot softness', pointer: 'Pointer style', pointer_color: 'Pointer colour (CSS)',
   show_guide: 'Arrow guide line', show_speed: 'Current speed dot', show_gust: 'Gust ring', show_rim: 'Outer circle', show_rings: 'Speed rings', show_spokes: 'Spokes', show_scale: 'Scale label', rings: 'Ring count',
   sectors: 'Prevailing bins', calm: 'Calm below (speed)', refresh: 'History refresh', max_width: 'Max size', tap_action: 'Tap action',
 };
@@ -291,6 +291,7 @@ const Base = globalThis.HTMLElement ?? class {};
 export const DEFAULTS = {
   window: '1h',
   heat_mode: 'plume',
+  heat_direction: 'from',
   plume_width: 15,
   plume_fade: 40,
   smooth: 8,
@@ -350,6 +351,15 @@ export class WindRoseCard extends Base {
             { name: 'direction_offset', selector: { number: { min: -180, max: 180, step: 1, mode: 'box', unit_of_measurement: '°' } } },
             { name: 'max_speed', selector: { number: { min: 0, mode: 'box' } } },
             { name: 'heat_mode', selector: { select: { mode: 'dropdown', options: ['plume', 'spots'] } } },
+            {
+              name: 'heat_direction',
+              selector: {
+                select: {
+                  mode: 'dropdown',
+                  options: [{ value: 'from', label: 'from (where it came from)' }, { value: 'to', label: 'to (blown downwind)' }],
+                },
+              },
+            },
             { name: 'plume_width', selector: { number: { min: 2, max: 45, step: 1, mode: 'slider', unit_of_measurement: '°' } } },
             { name: 'plume_fade', selector: { number: { min: 0, max: 80, step: 1, mode: 'slider', unit_of_measurement: '%' } } },
             { name: 'smooth', selector: { number: { min: 2, max: 25, step: 1, mode: 'slider' } } },
@@ -501,10 +511,12 @@ export class WindRoseCard extends Base {
     const rr = (v) => Math.min(R, (Math.max(0, v) / max) * R);
     const dirName = (d) => L.dirs[sectorOf(d, 16)];
 
+    // heat_direction "to": the heat is drawn downwind, as if blown by the wind (rotated 180°).
+    const heatRot = withOffset(off, c.heat_direction === 'to' ? 180 : 0);
     // The grid spans [-1, 1]² of the unit disc, i.e. exactly the rose's bounding square.
     const heat = this._heat
       ? `<image href="${this._heat}" x="${-R}" y="${-R}" width="${2 * R}" height="${2 * R}" preserveAspectRatio="none"${
-        off ? ` transform="rotate(${off})"` : ''}/>` : '';
+        heatRot ? ` transform="rotate(${heatRot})"` : ''}/>` : '';
 
     // Grid is decoration only: ring count/visibility never touches the heat map.
     let grid = c.show_rim === false ? '' : `<circle r="${R}"/>`;
@@ -521,8 +533,10 @@ export class WindRoseCard extends Base {
     let marker = '';
     if (Number.isFinite(dir)) {
       marker = pointerSvg(c.pointer, view(dir), R, { guide: c.show_guide !== false });
-      if (c.show_gust !== false && Number.isFinite(gust)) { const [x, y] = pt(rr(gust), view(dir)); marker += `<circle class="gust" cx="${x}" cy="${y}" r="4.5"/>`; }
-      if (c.show_speed !== false && Number.isFinite(speed)) { const [x, y] = pt(rr(speed), view(dir)); marker += `<circle class="now" cx="${x}" cy="${y}" r="4.5"/>`; }
+      // Speed/gust markers sit on the same side as the heat map (downwind when heat_direction is "to").
+      const markDir = withOffset(view(dir), c.heat_direction === 'to' ? 180 : 0);
+      if (c.show_gust !== false && Number.isFinite(gust)) { const [x, y] = pt(rr(gust), markDir); marker += `<circle class="gust" cx="${x}" cy="${y}" r="4.5"/>`; }
+      if (c.show_speed !== false && Number.isFinite(speed)) { const [x, y] = pt(rr(speed), markDir); marker += `<circle class="now" cx="${x}" cy="${y}" r="4.5"/>`; }
     }
 
     // Numbers live in the four corners, outside the rose, as secondary information.

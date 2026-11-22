@@ -22,7 +22,7 @@ Works in light and dark themes, in English and Portuguese (follows the HA langua
 
 ![Pointer styles: arrow, chevron, dart, needle, compass, vane, none](images/pointers.png)
 
-**Heat map** — plumes grow from the centre out to the speed reached; `plume_width` and `plume_fade` shape them, `spots` is the alternative look.
+**Heat map** — plumes grow from the centre out to the speed reached; `plume_width` and `plume_fade` shape them, `spots` is the alternative look and `heat_direction: to` draws them downwind, as if blown by the wind.
 
 ![Heat map modes: plume, wider plume, sharp tips, spots](images/heat.png)
 
@@ -60,6 +60,7 @@ name: Wind
 # Heat map
 window: 1h                # 15m, 30m, 1h, 2h, 3h, 6h, 12h, 24h
 heat_mode: plume          # plume | spots
+heat_direction: from      # from = toward where the wind came from | to = blown downwind
 plume_width: 15           # plume thickness (degrees)
 plume_fade: 40            # how gradually each plume tip fades (% of radius)
 smooth: 8                 # spot softness (heat_mode: spots)
@@ -115,6 +116,7 @@ A new card added from the card picker starts with this full list (the same optio
 | `calm` | `0.5` | Speeds below this count as calm and are left out of the heat map. |
 | `max_width` | `380` | Maximum size of the rose in px on wide cards. |
 | `heat_mode` | `plume` | `plume`: heat grows from the centre out to the speed reached in each direction. `spots`: a soft spot at each sample. |
+| `heat_direction` | `from` | `from`: the heat points to where the wind came from (meteorological wind rose). `to`: the heat is drawn downwind, as if blown by the wind; the speed dot and gust ring follow it, the pointer stays on the "from" side. |
 | `plume_width` | `15` | Plume thickness in degrees: higher merges nearby directions and hides thin streaks. |
 | `plume_fade` | `40` | How gradually each plume tip fades, in % of the radius: higher removes hard arcs (useful with sensors that report speed in steps); 0 = sharp tip. |
 | `smooth` | `8` | Spot size for `heat_mode: spots` (% of the radius). |

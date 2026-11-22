@@ -14,7 +14,7 @@ The rose is a polar heat map that grows **from the centre outward** (`heat_mode:
 
 On top of it, a large arrow on the rim points in from the current direction, a solid dot marks the current wind and a dashed ring the current gust. The rose fills the card; the numbers sit quietly in the corners: current speed (and a rain note), direction, gust, and the window's prevailing direction and max.
 
-Works in light and dark themes, in English and Portuguese (follows the HA language), in masonry and Sections dashboards. Everything scales with the card width.
+Works in light and dark themes, in English and Portuguese (card and visual editor follow the HA language), in masonry and Sections dashboards. Everything scales with the card width.
 
 ## Gallery
 
@@ -123,6 +123,10 @@ A new card added from the card picker starts with this full list (the same optio
 | `refresh` | `60` | Seconds between history reloads. |
 
 The card reads history through the recorder (`history/history_during_period`), so both sensors must be recorded. Direction sensors that report text (e.g. `NW`) are not supported — use a numeric degree sensor.
+
+## Troubleshooting
+
+**An option does nothing, or the card behaves like an older version.** Usually an older copy of the card is still loaded: only the first copy that loads is used. Open the browser console (F12) and look for `PT2VHF-WIND-ROSE <version>`; from 0.9.0 the card also prints a warning when another version is already loaded. Fix: keep a single `pt2vhf-wind-rose-card.js` entry in **Settings → Dashboards → ⋮ → Resources**, then clear the cache (Ctrl+F5, or *Reset frontend cache* in the companion app). The visual editor shows the running version under the wind speed field.
 
 ## Development
 

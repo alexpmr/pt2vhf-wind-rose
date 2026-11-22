@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  computeRose, toSeries, sectorOf, niceMax, isRaining, density, withOffset, windowMinutes, windowLabel, pointerSvg, plume, WindRoseCard, DEFAULTS,
+  computeRose, toSeries, sectorOf, niceMax, isRaining, density, withOffset, windowMinutes, windowLabel, pointerSvg, plume, WindRoseCard, DEFAULTS, editorText,
 } from '../pt2vhf-wind-rose-card.js';
 
 // Value of an n×n grid at polar (rho in unit radius, bearing in degrees; 0 = N, clockwise).
@@ -66,6 +66,22 @@ test('new-card YAML lists every option of the visual editor, with the defaults t
   const stub = WindRoseCard.getStubConfig({ states: {} });
   for (const n of names) assert.ok(n in stub, `missing in stub: ${n}`);
   for (const [k, v] of Object.entries(DEFAULTS)) assert.deepEqual(stub[k], v, k);
+});
+
+test('editor: every field has a label in pt and en, helpers exist for the confusing ones', () => {
+  const names = [];
+  const walk = (schema) => schema.forEach((s) => (s.schema ? walk(s.schema) : names.push(s.name)));
+  walk(WindRoseCard.getConfigForm().schema);
+  for (const lang of ['pt', 'en']) {
+    const { labels, helpers } = editorText(lang);
+    for (const n of names) assert.ok(labels[n], `${lang} label missing: ${n}`);
+    for (const n of ['show_guide', 'smooth', 'heat_direction', 'plume_fade', 'direction_offset']) {
+      assert.ok(helpers[n], `${lang} helper missing: ${n}`);
+    }
+    assert.match(helpers.entity, new RegExp(WindRoseCard.VERSION.replace(/\./g, '\\.')));
+  }
+  assert.equal(editorText('pt').labels.entity, 'Velocidade do vento');
+  assert.equal(editorText('de').labels.entity, editorText('en').labels.entity); // unknown → English
 });
 
 test('setConfig fills defaults but an old "hours" config still wins over the default window', () => {

@@ -4,7 +4,7 @@
  * comes FROM, distance from the centre = speed, colour = how much time it blew there.
  * https://github.com/alexpmr/pt2vhf-wind-rose
  */
-const VERSION = '0.8.0';
+const VERSION = '0.9.0';
 const TAG = 'pt2vhf-wind-rose-card';
 
 const STR = {
@@ -276,13 +276,56 @@ export function pointerSvg(style, dir, R, { guide = true } = {}) {
   }
 }
 
-const LABELS = {
-  entity: 'Wind speed', direction_entity: 'Wind direction (degrees)', gust_entity: 'Gust', rain_entity: 'Rain',
-  name: 'Name', window: 'Heat-map window', direction_offset: 'Rotate rose (display only)', max_speed: 'Max speed (0 = auto)',
-  heat_mode: 'Heat-map style', heat_direction: 'Heat-map points', plume_width: 'Plume thickness', plume_fade: 'Plume tip fade', smooth: 'Spot softness', pointer: 'Pointer style', pointer_color: 'Pointer colour (CSS)',
-  show_guide: 'Arrow guide line', show_speed: 'Current speed dot', show_gust: 'Gust ring', show_rim: 'Outer circle', show_rings: 'Speed rings', show_spokes: 'Spokes', show_scale: 'Scale label', rings: 'Ring count',
-  sectors: 'Prevailing bins', calm: 'Calm below (speed)', refresh: 'History refresh', max_width: 'Max size', tap_action: 'Tap action',
+const EDITOR = {
+  en: {
+    labels: {
+      entity: 'Wind speed', direction_entity: 'Wind direction (degrees)', gust_entity: 'Gust', rain_entity: 'Rain',
+      name: 'Name', window: 'Heat-map window', direction_offset: 'Rotate rose (display only)', max_speed: 'Max speed (0 = auto)',
+      heat_mode: 'Heat-map style', heat_direction: 'Heat-map points', plume_width: 'Plume thickness', plume_fade: 'Plume tip fade',
+      smooth: 'Spot softness', pointer: 'Pointer style', pointer_color: 'Pointer colour (CSS)',
+      show_guide: 'Arrow guide line', show_speed: 'Current speed dot', show_gust: 'Gust ring', show_rim: 'Outer circle',
+      show_rings: 'Speed rings', show_spokes: 'Spokes', show_scale: 'Scale label', rings: 'Ring count',
+      sectors: 'Prevailing bins', calm: 'Calm below (speed)', refresh: 'History refresh', max_width: 'Max size', tap_action: 'Tap action',
+    },
+    helpers: {
+      entity: `PT2VHF Wind Rose ${VERSION}`,
+      heat_direction: 'from: heat points to where the wind came from. to: heat is blown downwind.',
+      plume_fade: 'How gradually each plume tip fades. Higher removes hard arcs; 0 = sharp tip.',
+      smooth: 'Only used when the heat-map style is "spots".',
+      direction_offset: 'Turns the whole rose clockwise to match how you face the screen. Values stay true.',
+      show_guide: 'Only for the "arrow" pointer.',
+    },
+    appearance: 'Appearance',
+  },
+  pt: {
+    labels: {
+      entity: 'Velocidade do vento', direction_entity: 'Direção do vento (graus)', gust_entity: 'Rajada', rain_entity: 'Chuva',
+      name: 'Nome', window: 'Janela do mapa de calor', direction_offset: 'Girar a rosa (só exibição)', max_speed: 'Velocidade máxima (0 = auto)',
+      heat_mode: 'Estilo do mapa de calor', heat_direction: 'Sentido do mapa de calor', plume_width: 'Espessura das plumas',
+      plume_fade: 'Esmaecimento da ponta', smooth: 'Suavidade das manchas', pointer: 'Estilo do ponteiro', pointer_color: 'Cor do ponteiro (CSS)',
+      show_guide: 'Linha guia da seta', show_speed: 'Ponto da velocidade', show_gust: 'Círculo da rajada', show_rim: 'Círculo externo',
+      show_rings: 'Anéis de velocidade', show_spokes: 'Linhas dos setores', show_scale: 'Número da escala', rings: 'Quantidade de anéis',
+      sectors: 'Setores da predominante', calm: 'Calmaria abaixo de', refresh: 'Atualização do histórico', max_width: 'Tamanho máximo', tap_action: 'Ação ao tocar',
+    },
+    helpers: {
+      entity: `PT2VHF Wind Rose ${VERSION}`,
+      heat_direction: 'from: a mancha aponta de onde o vento veio. to: a mancha é soprada pelo vento.',
+      plume_fade: 'Quanto a ponta de cada pluma se desfaz. Maior tira os arcos duros; 0 = ponta seca.',
+      smooth: 'Só vale quando o estilo do mapa é "spots".',
+      direction_offset: 'Gira a rosa inteira no sentido horário para combinar com a sua posição. Os valores continuam reais.',
+      show_guide: 'Só para o ponteiro "arrow".',
+    },
+    appearance: 'Aparência',
+  },
 };
+
+/** Editor labels/helpers for a language ("pt", "en"…); unknown languages fall back to English. */
+export function editorText(lang) {
+  return EDITOR[String(lang || '').slice(0, 2)] || EDITOR.en;
+}
+
+// The visual editor has no hass argument, so use the page language HA sets on <html>.
+const pageLang = () => globalThis.document?.documentElement?.lang || globalThis.navigator?.language || 'en';
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const Base = globalThis.HTMLElement ?? class {};
@@ -315,6 +358,8 @@ export const DEFAULTS = {
 };
 
 export class WindRoseCard extends Base {
+  static VERSION = VERSION;
+
   // A new card's YAML lists every option (same set as the visual editor), so it can be edited later.
   static getStubConfig(hass) {
     const ids = Object.keys(hass?.states || {});
@@ -330,6 +375,7 @@ export class WindRoseCard extends Base {
   }
 
   static getConfigForm() {
+    const T = editorText(pageLang());
     const form = {
       schema: [
         { name: 'entity', required: true, selector: { entity: { domain: 'sensor' } } },
@@ -366,7 +412,7 @@ export class WindRoseCard extends Base {
           ],
         },
         {
-          type: 'expandable', name: '', title: 'Appearance', schema: [
+          type: 'expandable', name: '', title: T.appearance, schema: [
             {
               name: 'pointer',
               selector: { select: { mode: 'dropdown', options: POINTERS } },
@@ -392,7 +438,8 @@ export class WindRoseCard extends Base {
         },
         { name: 'tap_action', selector: { ui_action: {} } },
       ],
-      computeLabel: (s) => LABELS[s.name],
+      computeLabel: (s) => T.labels[s.name],
+      computeHelper: (s) => T.helpers[s.name],
     };
     // Show the real defaults (e.g. toggles that are on) even when a key is missing from the YAML.
     const fill = (schema) => schema.forEach((s) => (s.schema ? fill(s.schema) : (s.name in DEFAULTS && (s.default = DEFAULTS[s.name]))));
@@ -603,7 +650,14 @@ export class WindRoseCard extends Base {
   }
 }
 
-if (globalThis.customElements && !customElements.get(TAG)) {
+// Only the first copy that loads is used. A second dashboard resource (often an older version left
+// behind) silently wins the race, so say so loudly — this is the usual cause of "option X does nothing".
+const loaded = globalThis.customElements?.get(TAG);
+if (loaded && loaded.VERSION !== VERSION) {
+  console.warn(`PT2VHF Wind Rose: version ${loaded.VERSION ?? '< 0.9.0'} is already loaded, so this copy (${VERSION}) is ignored. `
+    + 'Remove the extra pt2vhf-wind-rose-card.js entry in Settings → Dashboards → ⋮ → Resources and clear the browser cache.');
+}
+if (globalThis.customElements && !loaded) {
   customElements.define(TAG, WindRoseCard);
   window.customCards = window.customCards || [];
   window.customCards.push({

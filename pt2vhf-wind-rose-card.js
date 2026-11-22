@@ -4,21 +4,21 @@
  * comes FROM, distance from the centre = speed, colour = how much time it blew there.
  * https://github.com/alexpmr/pt2vhf-wind-rose
  */
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 const TAG = 'pt2vhf-wind-rose-card';
 
 const STR = {
   en: {
     dirs: ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'],
-    gust: 'Gust', prevailing: 'Prevailing', avg: 'Avg', max: 'Max', calm: 'Calm',
+    gust: 'Gust', max: 'max',
     window: (h) => (h === 1 ? 'Last hour' : `Last ${h} h`), nodata: 'No history yet', unavailable: 'Unavailable',
-    raining: 'Raining',
+    raining: 'rain', wind: 'Wind', direction: 'Direction',
   },
   pt: {
     dirs: ['N', 'NNE', 'NE', 'ENE', 'L', 'ESE', 'SE', 'SSE', 'S', 'SSO', 'SO', 'OSO', 'O', 'ONO', 'NO', 'NNO'],
-    gust: 'Rajada', prevailing: 'Predominante', avg: 'Média', max: 'Máx', calm: 'Calmaria',
+    gust: 'Rajada', max: 'máx',
     window: (h) => (h === 1 ? 'Última hora' : `Últimas ${h} h`), nodata: 'Sem histórico ainda', unavailable: 'Indisponível',
-    raining: 'Chovendo',
+    raining: 'chuva', wind: 'Vento', direction: 'Direção',
   },
 };
 
@@ -55,7 +55,7 @@ export function sectorOf(deg, sectors) {
  * Samples both series on an even time grid (last known value wins) and bins
  * them into sectors × rings. Time-weighted by construction.
  */
-export function computeRose(speed, dir, { start, end, sectors = 16, rings = 5, maxSpeed, calm = 0.5 }) {
+export function computeRose(speed, dir, { start, end, sectors = 16, rings = 5, maxSpeed, calm = 0.5, atLeast = 0 }) {
   const n = Math.min(1440, Math.max(1, Math.round((end - start) / 10000)));
   const step = (end - start) / n;
   const samples = [];
@@ -71,7 +71,7 @@ export function computeRose(speed, dir, { start, end, sectors = 16, rings = 5, m
     if (Number.isFinite(s) && Number.isFinite(d) && s >= 0) samples.push([s, d]);
   }
   const peak = samples.reduce((m, [s]) => Math.max(m, s), 0);
-  const max = maxSpeed > 0 ? maxSpeed : niceMax(Math.max(peak, 1));
+  const max = maxSpeed > 0 ? maxSpeed : niceMax(Math.max(peak, atLeast, 1));
   const counts = Array.from({ length: sectors }, () => new Array(rings).fill(0));
   const bySector = new Array(sectors).fill(0);
   let calmN = 0;
@@ -203,6 +203,8 @@ class WindRoseCard extends Base {
       });
       this._rose = computeRose(toSeries(res[c.entity]), toSeries(res[c.direction_entity]), {
         start, end, sectors: c.sectors, rings: c.rings, maxSpeed: c.max_speed, calm: c.calm,
+        // Auto scale also fits the current speed and gust, so their markers stay inside the rose.
+        atLeast: Math.max(0, ...[c.entity, c.gust_entity].map((id) => parseFloat(this._hass.states[id]?.state)).filter(Number.isFinite)),
       });
       this._error = null;
     } catch (e) {
@@ -261,35 +263,42 @@ class WindRoseCard extends Base {
     for (let r = 1; r <= c.rings; r++) grid += `<circle r="${(R * r) / c.rings}"/>`;
     for (let a = 0; a < 360; a += 45) { const [x, y] = pt(R, a); grid += `<line x2="${x}" y2="${y}"/>`; }
     const labels = [0, 90, 180, 270].map((a) => {
-      const [x, y] = pt(R + 11, a);
-      return `<text x="${x}" y="${y}">${L.dirs[a / 22.5]}</text>`;
+      const [x, y] = pt(R + 10, a);
+      return `<text class="card" x="${x}" y="${y}">${L.dirs[a / 22.5]}</text>`;
     }).join('');
-    // Rim speed, outside the ring at the lower right, away from the N/E/S/W labels.
-    const [sx, sy] = pt(R + 8, 135);
-    const scale = `<text class="scale" x="${sx}" y="${sy}">${nf.format(max)} ${esc(unit)}</text>`;
+    // Rim speed, just outside the ring at the lower right.
+    const [sx, sy] = pt(R + 7, 135);
+    const scale = `<text class="scale" x="${sx}" y="${sy}">${nf.format(max)}</text>`;
 
     let marker = '';
     if (Number.isFinite(dir)) {
-      // Arrow sits on the rim where the wind comes from and points into the rose.
-      const [ax, ay] = pt(R - 11, dir);
-      const [bx, by] = pt(R + 3, dir - 7);
-      const [cx, cy] = pt(R + 3, dir + 7);
-      marker = `<path class="arrow" d="M${ax} ${ay}L${bx} ${by}L${cx} ${cy}Z"/>`;
-      if (Number.isFinite(gust)) { const [x, y] = pt(rr(gust), dir); marker += `<circle class="gust" cx="${x}" cy="${y}" r="4"/>`; }
-      if (Number.isFinite(speed)) { const [x, y] = pt(rr(speed), dir); marker += `<circle class="now" cx="${x}" cy="${y}" r="4"/>`; }
+      // Arrow on the rim where the wind comes from, pointing into the rose, with a guide to the centre.
+      const [ax, ay] = pt(R - 15, dir);
+      const [bx, by] = pt(R + 5, dir - 9);
+      const [cx, cy] = pt(R + 5, dir + 9);
+      const [lx, ly] = pt(R - 15, dir);
+      marker = `<line class="guide" x2="${lx}" y2="${ly}"/><path class="arrow" d="M${ax} ${ay}L${bx} ${by}L${cx} ${cy}Z"/>`;
+      if (Number.isFinite(gust)) { const [x, y] = pt(rr(gust), dir); marker += `<circle class="gust" cx="${x}" cy="${y}" r="4.5"/>`; }
+      if (Number.isFinite(speed)) { const [x, y] = pt(rr(speed), dir); marker += `<circle class="now" cx="${x}" cy="${y}" r="4.5"/>`; }
     }
 
-    const stats = [];
-    if (rose?.total) {
-      if (rose.prevailing >= 0) stats.push(`${L.prevailing} <b>${L.dirs[sectorOf(rose.prevailing * step, 16)]}</b>`);
-      stats.push(`${L.avg} <b>${nf.format(rose.avg)}</b> · ${L.max} <b>${nf.format(rose.peak)}</b>`);
-      if (rose.calm >= 0.01) stats.push(`${L.calm} <b>${Math.round(rose.calm * 100)}%</b>`);
-    } else if (rose) {
-      stats.push(L.nodata);
-    }
-    if (this._error) stats.push(`<span class="err">${esc(this._error)}</span>`);
-
+    // Numbers live in the four corners, outside the rose, as secondary information.
+    const corner = (x, y, anchor, label, value) => `<text class="lbl" x="${x}" y="${y}" text-anchor="${anchor}">${label}</text>`
+      + `<text class="val" x="${x}" y="${y + 12}" text-anchor="${anchor}">${value}</text>`;
+    const u = (s) => `<tspan class="unit">${esc(s)}</tspan>`;
+    const rain = raining ? ` <tspan class="rain">· ${L.raining}</tspan>` : '';
+    let hist = '';
+    if (this._error) hist = `<tspan class="err">!</tspan>`;
+    else if (rose?.total) {
+      const pv = rose.prevailing >= 0 ? `${L.dirs[sectorOf(rose.prevailing * step, 16)]} · ` : '';
+      hist = `${pv}${u(`${L.max} `)}${nf.format(rose.peak)}`;
+    } else if (rose) hist = u(L.nodata);
     const big = Number.isFinite(speed) ? nf.format(speed) : '—';
+    const corners = corner(-98, -92, 'start', `${esc(c.name || L.wind)}${rain}`, `${big}${u(` ${unit}`)}`)
+      + corner(98, -92, 'end', L.direction, Number.isFinite(dir) ? `${dirName(dir)} ${u(`${Math.round(dir)}°`)}` : u(L.unavailable))
+      + (Number.isFinite(gust) ? corner(-98, 78, 'start', L.gust, `${nf.format(gust)}${u(` ${gu.attributes?.unit_of_measurement || unit}`)}`) : '')
+      + (hist ? corner(98, 78, 'end', L.window(c.hours), hist) : '');
+
     if (!this._root) {
       this._root = this.attachShadow({ mode: 'open' });
       // Listeners live on the shadow root so they survive innerHTML re-renders.
@@ -300,58 +309,35 @@ class WindRoseCard extends Base {
     }
     this._root.innerHTML = `
 <style>
-  ha-card { display: block; padding: 12px 14px; height: 100%; box-sizing: border-box; container-type: inline-size; }
-  .wrap { display: flex; gap: 16px; align-items: center; justify-content: center; }
-  svg { flex: 0 0 auto; width: 148px; height: 148px; overflow: visible; }
-  .info > * { white-space: nowrap; }
-  /* Narrow column: rose on top, values below, centred. */
-  @container (max-width: 300px) {
-    .wrap { flex-direction: column; gap: 8px; }
-    svg { width: min(100%, 180px); height: auto; aspect-ratio: 1; }
-    .info { align-items: center; text-align: center; }
-    .hist { align-items: center; }
-  }
+  ha-card { display: block; padding: 8px; height: 100%; box-sizing: border-box; }
+  svg { display: block; width: 100%; max-width: ${c.max_width ?? 380}px; margin: 0 auto; height: auto; aspect-ratio: 1; }
   .grid circle, .grid line { fill: none; stroke: var(--divider-color, #8884); stroke-width: .6; }
-  text { fill: var(--secondary-text-color); font-size: 11px; text-anchor: middle; dominant-baseline: central; }
-  text.scale { font-size: 8px; text-anchor: start; }
-  .arrow { fill: var(--primary-text-color); }
+  text { fill: var(--secondary-text-color); dominant-baseline: central; font-family: inherit; }
+  text.card { font-size: 9px; text-anchor: middle; }
+  text.scale { font-size: 6.5px; text-anchor: middle; opacity: .8; }
+  text.lbl { font-size: 7.5px; opacity: .8; }
+  text.val { font-size: 11px; fill: var(--primary-text-color); opacity: .85; }
+  tspan.unit { font-size: 7.5px; fill: var(--secondary-text-color); }
+  tspan.rain { fill: var(--info-color, #039be5); }
+  tspan.err { fill: var(--error-color, #db4437); }
+  .arrow { fill: var(--primary-text-color); stroke: var(--card-background-color, #fff); stroke-width: 1; stroke-linejoin: round; }
+  .guide { stroke: var(--primary-text-color); stroke-width: 1; stroke-dasharray: 2 2; opacity: .55; }
   .now { fill: var(--primary-text-color); stroke: var(--card-background-color, #fff); stroke-width: 1.5; }
   .gust { fill: none; stroke: var(--primary-text-color); stroke-width: 1.5; stroke-dasharray: 2 1.5; }
-  .info { min-width: 0; display: flex; flex-direction: column; gap: 2px; color: var(--secondary-text-color); font-size: 13px; }
-  .name { font-size: 14px; color: var(--secondary-text-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .now-v { color: var(--primary-text-color); font-size: 28px; line-height: 1.1; font-weight: 500; }
-  .now-v small { font-size: 14px; font-weight: 400; color: var(--secondary-text-color); margin-left: 3px; }
-  .dir { color: var(--primary-text-color); font-size: 15px; }
-  .hist { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--divider-color, #8883); display: flex; flex-direction: column; gap: 1px; }
-  .hist .t { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
-  b { color: var(--primary-text-color); font-weight: 500; }
-  .err { color: var(--error-color, #db4437); font-size: 11px; }
   ha-card.tap { cursor: pointer; }
   ha-card:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
-  .name-row { display: flex; align-items: center; gap: 8px; }
-  .rain { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; color: var(--info-color, #039be5); white-space: nowrap; }
-  .rain ha-icon { --mdc-icon-size: 16px; }
 </style>
 <ha-card class="${tappable ? 'tap' : ''}" ${tappable ? 'role="button" tabindex="0"' : ''}>
-  <div class="wrap">
   <svg viewBox="-100 -100 200 200" role="img" aria-label="${esc(`${big} ${unit} ${Number.isFinite(dir) ? dirName(dir) : ''}`)}">
+    ${this._error ? `<title>${esc(this._error)}</title>` : ''}
     <defs>
       <filter id="soft" x="-10%" y="-10%" width="120%" height="120%"><feGaussianBlur stdDeviation="${c.smooth ?? 2}"/></filter>
       <clipPath id="disc"><circle r="${R}"/></clipPath>
     </defs>
     <g clip-path="url(#disc)"><g filter="url(#soft)">${cells}</g></g>
     <g class="grid">${grid}</g>
-    ${labels}${scale}${marker}
+    ${labels}${scale}${marker}${corners}
   </svg>
-  <div class="info">
-    ${c.name || raining ? `<div class="name-row">${c.name ? `<div class="name">${esc(c.name)}</div>` : ''}${raining
-      ? `<span class="rain"><ha-icon icon="mdi:weather-rainy"></ha-icon>${L.raining}</span>` : ''}</div>` : ''}
-    <div class="now-v">${big}<small>${esc(unit)}</small></div>
-    <div class="dir">${Number.isFinite(dir) ? `${dirName(dir)} · ${Math.round(dir)}°` : L.unavailable}</div>
-    ${Number.isFinite(gust) ? `<div>${L.gust} <b>${nf.format(gust)}</b> ${esc(gu.attributes?.unit_of_measurement || unit)}</div>` : ''}
-    ${stats.length ? `<div class="hist"><span class="t">${L.window(c.hours)}</span>${stats.map((s) => `<span>${s}</span>`).join('')}</div>` : ''}
-  </div>
-  </div>
 </ha-card>`;
   }
 }

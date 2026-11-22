@@ -68,6 +68,8 @@ test('auto max uses observed peak; speed above max clamps to outer ring', () => 
   assert.ok(r.counts[2][4] > 0);
   const auto = computeRose([{ t: 0, v: 12 }], [{ t: 0, v: 45 }], { start, end });
   assert.equal(auto.max, 12);
+  const withGust = computeRose([{ t: 0, v: 12 }], [{ t: 0, v: 45 }], { start, end, atLeast: 13 });
+  assert.equal(withGust.max, 15);
 });
 
 test('no data before first sample and unavailable values are skipped', () => {

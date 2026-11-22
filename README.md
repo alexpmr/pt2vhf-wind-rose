@@ -10,9 +10,9 @@ The rose is a polar heat map:
 - **distance from the centre** = speed (calm in the middle, strong at the rim)
 - **colour** = share of time the wind blew there (blue = rare → red = most of the time)
 
-On top of it, a solid dot marks the current wind, a dashed ring marks the current gust and an arrow on the rim points in from the current direction. Beside the rose: current speed, direction (cardinal + degrees), gust, and for the window: prevailing direction, average, max and % of calm.
+On top of it, a large arrow on the rim points in from the current direction, a solid dot marks the current wind and a dashed ring the current gust. The rose fills the card; the numbers sit quietly in the corners: current speed (and a rain note), direction, gust, and the window's prevailing direction and max.
 
-Works in light and dark themes, in English and Portuguese (follows the HA language), in masonry and Sections dashboards. In narrow columns (under ~300 px) the values move below the rose.
+Works in light and dark themes, in English and Portuguese (follows the HA language), in masonry and Sections dashboards. Everything scales with the card width.
 
 ## Install
 
@@ -43,7 +43,7 @@ hours: 1                             # history window (default 1)
 | `entity` | — | Wind speed sensor. Its unit is shown as is. |
 | `direction_entity` | — | Wind direction sensor, numeric degrees. |
 | `gust_entity` | — | Gust sensor (optional). |
-| `rain_entity` | — | Rain sensor (optional): a `binary_sensor` (`on`) or a numeric rate/amount (> 0). Shows a "Raining" badge only while it rains. |
+| `rain_entity` | — | Rain sensor (optional): a `binary_sensor` (`on`) or a numeric rate/amount (> 0). Shows a "rain" note only while it rains. |
 | `tap_action` | `more-info` | Standard Home Assistant action on tap (`more-info` of the speed sensor by default, `navigate`, `none`, …). |
 | `name` | — | Title above the values. |
 | `hours` | `1` | Window of history used for the heat map. |
@@ -51,6 +51,7 @@ hours: 1                             # history window (default 1)
 | `sectors` | `16` | Direction bins: 8, 16 or 32. |
 | `rings` | `5` | Speed bins from centre to rim. |
 | `calm` | `0.5` | Speeds below this count as calm (not drawn, shown as %). |
+| `max_width` | `380` | Maximum size of the rose in px on wide cards. |
 | `smooth` | `2` | Blur of the heat map (0 = sharp cells). |
 | `refresh` | `60` | Seconds between history reloads. |
 

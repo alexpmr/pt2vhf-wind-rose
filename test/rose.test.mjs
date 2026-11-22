@@ -1,6 +1,56 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeRose, toSeries, sectorOf, niceMax, isRaining, density } from '../pt2vhf-wind-rose-card.js';
+import {
+  computeRose, toSeries, sectorOf, niceMax, isRaining, density, withOffset, windowMinutes, windowLabel, pointerSvg,
+} from '../pt2vhf-wind-rose-card.js';
+
+test('withOffset adds degrees and wraps to [0, 360)', () => {
+  assert.equal(withOffset(350, 20), 10);
+  assert.equal(withOffset(10, -20), 350);
+  assert.equal(withOffset(90, 0), 90);
+  assert.equal(withOffset(90, 720), 90);
+  assert.ok(Number.isNaN(withOffset(NaN, 10)));
+});
+
+test('windowMinutes reads window (m/h/plain minutes) and falls back to hours', () => {
+  assert.equal(windowMinutes({}), 60);
+  assert.equal(windowMinutes({ hours: 2 }), 120);
+  assert.equal(windowMinutes({ window: '30m' }), 30);
+  assert.equal(windowMinutes({ window: '15 min' }), 15);
+  assert.equal(windowMinutes({ window: '6h' }), 360);
+  assert.equal(windowMinutes({ window: '1.5h' }), 90);
+  assert.equal(windowMinutes({ window: 45 }), 45);
+  assert.equal(windowMinutes({ window: '2h', hours: 5 }), 120); // window wins
+  assert.equal(windowMinutes({ window: 'nonsense', hours: 3 }), 180);
+  assert.equal(windowMinutes({ window: '0m' }), 60);
+});
+
+test('windowLabel in pt and en', () => {
+  assert.equal(windowLabel('pt', 60), 'Última hora');
+  assert.equal(windowLabel('pt', 30), 'Últimos 30 min');
+  assert.equal(windowLabel('pt', 360), 'Últimas 6 h');
+  assert.equal(windowLabel('pt', 90), 'Últimas 1,5 h');
+  assert.equal(windowLabel('en', 60), 'Last hour');
+  assert.equal(windowLabel('en', 15), 'Last 15 min');
+  assert.equal(windowLabel('en', 120), 'Last 2 h');
+});
+
+test('pointerSvg: every style draws, none draws nothing, unknown falls back to arrow', () => {
+  assert.equal(pointerSvg('none', 90, 80), '');
+  for (const s of ['arrow', 'needle', 'compass']) assert.match(pointerSvg(s, 90, 80), /<path/);
+  assert.equal(pointerSvg('bogus', 90, 80), pointerSvg('arrow', 90, 80));
+  // Wind from the east (90°): arrow tip sits on the +x axis inside the rim.
+  assert.match(pointerSvg('arrow', 90, 80), /d="M65 0L/);
+});
+
+test('ring count never changes the heat map', () => {
+  const sp = [{ t: 0, v: 3 }, { t: H / 3, v: 7 }, { t: H / 2, v: 1.8 }];
+  const dr = [{ t: 0, v: 300 }, { t: H / 4, v: 20 }, { t: H / 2, v: 340 }];
+  const a = computeRose(sp, dr, { start, end, rings: 3, maxSpeed: 10 });
+  const b = computeRose(sp, dr, { start, end, rings: 9, maxSpeed: 10 });
+  assert.deepEqual(a.points, b.points);
+  assert.deepEqual(Array.from(density(a.points, 32, 0.08)), Array.from(density(b.points, 32, 0.08)));
+});
 
 const argmax = (g) => g.reduce((b, v, i) => (v > g[b] ? i : b), 0);
 

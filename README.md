@@ -35,7 +35,8 @@ entity: sensor.wind_speed            # required – wind speed
 direction_entity: sensor.wind_bearing # required – direction in degrees (0 = N)
 gust_entity: sensor.wind_gust        # optional
 name: Wind                           # optional
-hours: 1                             # history window (default 1)
+window: 1h                           # heat-map window: 15m, 30m, 1h, 6h, 24h…
+pointer: arrow                       # arrow | needle | compass | none
 ```
 
 | Option | Default | Description |
@@ -46,10 +47,17 @@ hours: 1                             # history window (default 1)
 | `rain_entity` | — | Rain sensor (optional): a `binary_sensor` (`on`) or a numeric rate/amount (> 0). Shows a "rain" note only while it rains. |
 | `tap_action` | `more-info` | Standard Home Assistant action on tap (`more-info` of the speed sensor by default, `navigate`, `none`, …). |
 | `name` | Wind | Label of the speed corner. |
-| `hours` | `1` | Window of history used for the heat map. |
+| `window` | `1h` | History window of the heat map: minutes or hours, e.g. `15m`, `30m`, `1h`, `1.5h`, `24h` (a plain number = minutes). |
+| `hours` | `1` | Older way to set the window in whole hours; ignored when `window` is set. |
+| `direction_offset` | `0` | Degrees added to the direction sensor (may be negative), for vanes not aligned with true north. Applies to the pointer, the heat map and the text. |
 | `max_speed` | auto | Speed at the rim. Auto picks a round value above the window's peak. |
 | `sectors` | `16` | Direction bins used for the prevailing direction: 8, 16 or 32. |
-| `rings` | `5` | Number of speed circles drawn on the grid. |
+| `rings` | `5` | Number of speed circles drawn on the grid (never changes the heat map). |
+| `show_rings` | `true` | Show the inner speed circles (the outer rim always stays). |
+| `show_spokes` | `true` | Show the 8 radial lines. |
+| `show_scale` | `true` | Show the rim speed label. |
+| `pointer` | `arrow` | Current-direction pointer: `arrow` (triangle on the rim + guide), `needle` (compass needle through the centre), `compass` (wide arrow from the rim to the centre) or `none`. All mark the side the wind comes from. |
+| `pointer_color` | text colour | Any CSS colour for the pointer, e.g. `#e8553e` or `var(--accent-color)`. |
 | `calm` | `0.5` | Speeds below this count as calm and are left out of the heat map. |
 | `max_width` | `380` | Maximum size of the rose in px on wide cards. |
 | `smooth` | `8` | Spread of each sample in the heat map, in % of the radius (lower = more detail, higher = softer). |

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Wind Rose options</title>
+<style>
+  body { margin: 0; padding: 16px; background: #111; display: grid; grid-template-columns: repeat(4, 240px); gap: 12px;
+    --primary-text-color: #e1e1e1; --secondary-text-color: #9b9b9b; --divider-color: #ffffff1f; --card-background-color: #1c1c1c; font-family: Roboto, system-ui, sans-serif; }
+  figure { margin: 0; color: #9b9b9b; font-size: 12px; }
+  figcaption { margin-top: 4px; text-align: center; }
+</style>
+</head>
+<body>
+<script type="module">
+  import '../pt2vhf-wind-rose-card.js';
+  // One card per option set: pointer styles, grid toggles, offset and window.
+  const now = Date.now() / 1000;
+  const sp = [], dr = [];
+  let seed = 11; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (let t = now - 6 * 3600; t < now; t += 30) {
+    sp.push({ s: String(1.5 + rnd() * 4), lu: t });
+    dr.push({ s: String((330 + (rnd() - 0.5) * 70 + 360) % 360), lu: t });
+  }
+  const hass = {
+    language: 'pt-BR', locale: { language: 'pt-BR' },
+    states: {
+      'sensor.wind_speed': { state: '3', attributes: { unit_of_measurement: 'km/h' } },
+      'sensor.wind_direction': { state: '332', attributes: {} },
+      'sensor.wind_gust': { state: '5', attributes: { unit_of_measurement: 'km/h' } },
+    },
+    callWS: async (m) => {
+      const from = Date.parse(m.start_time) / 1000;
+      return { 'sensor.wind_speed': sp.filter((p) => p.lu >= from), 'sensor.wind_direction': dr.filter((p) => p.lu >= from) };
+    },
+  };
+  const base = { entity: 'sensor.wind_speed', direction_entity: 'sensor.wind_direction', gust_entity: 'sensor.wind_gust', name: 'Vento' };
+  const cases = [
+    ['pointer: arrow', {}],
+    ['pointer: needle', { pointer: 'needle' }],
+    ['pointer: compass', { pointer: 'compass' }],
+    ['pointer: none', { pointer: 'none' }],
+    ['show_rings/spokes: false', { show_rings: false, show_spokes: false }],
+    ['show_scale: false, rings: 3', { show_scale: false, rings: 3 }],
+    ['direction_offset: 90', { direction_offset: 90 }],
+    ['window: 30m, needle #e8553e', { window: '30m', pointer: 'needle', pointer_color: '#e8553e' }],
+  ];
+  for (const [label, cfg] of cases) {
+    const f = document.createElement('figure');
+    const c = document.createElement('pt2vhf-wind-rose-card');
+    c.setConfig({ ...base, ...cfg });
+    c.hass = hass;
+    const cap = document.createElement('figcaption');
+    cap.textContent = label;
+    f.append(c, cap);
+    document.body.append(f);
+  }
+</script>
+</body>
+</html>

@@ -4,20 +4,20 @@
  * comes FROM, distance from the centre = speed, colour = how much time it blew there.
  * https://github.com/alexpmr/pt2vhf-wind-rose
  */
-const VERSION = '0.4.0';
+const VERSION = '0.5.0';
 const TAG = 'pt2vhf-wind-rose-card';
 
 const STR = {
   en: {
     dirs: ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'],
     gust: 'Gust', max: 'max',
-    window: (h) => (h === 1 ? 'Last hour' : `Last ${h} h`), nodata: 'No history yet', unavailable: 'Unavailable',
+    hour: 'Last hour', mins: (m) => `Last ${m} min`, hours: (h) => `Last ${h} h`, nodata: 'No history yet', unavailable: 'Unavailable',
     raining: 'rain', wind: 'Wind', direction: 'Direction',
   },
   pt: {
     dirs: ['N', 'NNE', 'NE', 'ENE', 'L', 'ESE', 'SE', 'SSE', 'S', 'SSO', 'SO', 'OSO', 'O', 'ONO', 'NO', 'NNO'],
     gust: 'Rajada', max: 'máx',
-    window: (h) => (h === 1 ? 'Última hora' : `Últimas ${h} h`), nodata: 'Sem histórico ainda', unavailable: 'Indisponível',
+    hour: 'Última hora', mins: (m) => `Últimos ${m} min`, hours: (h) => `Últimas ${h} h`, nodata: 'Sem histórico ainda', unavailable: 'Indisponível',
     raining: 'chuva', wind: 'Vento', direction: 'Direção',
   },
 };
@@ -41,6 +41,26 @@ export function isRaining(stateObj) {
   if (s === 'on') return true;
   const n = parseFloat(s);
   return Number.isFinite(n) && n > 0;
+}
+
+/** Direction + offset (degrees), wrapped to [0, 360). NaN stays NaN. */
+export function withOffset(deg, offset = 0) {
+  return (((deg + (Number(offset) || 0)) % 360) + 360) % 360;
+}
+
+/** History window in minutes: `window` ("30m", "15 min", "6h", "1.5h" or plain minutes) wins over `hours`. */
+export function windowMinutes(c) {
+  const m = String(c.window ?? '').trim().match(/^(\d+(?:\.\d+)?)\s*(m|min|h)?$/i);
+  const v = m ? parseFloat(m[1]) * (/^h$/i.test(m[2] || '') ? 60 : 1) : 0;
+  if (v > 0) return v;
+  return (Number(c.hours) > 0 ? Number(c.hours) : 1) * 60;
+}
+
+export function windowLabel(lang, minutes) {
+  const L = STR[lang] || STR.en;
+  if (minutes === 60) return L.hour;
+  if (minutes < 60) return L.mins(Math.round(minutes));
+  return L.hours(new Intl.NumberFormat(lang, { maximumFractionDigits: 1 }).format(minutes / 60));
 }
 
 export function niceMax(v) {
@@ -157,6 +177,43 @@ const pt = (r, deg) => {
   return [+(r * Math.sin(a)).toFixed(2), +(-r * Math.cos(a)).toFixed(2)];
 };
 
+/** Polygon in rose-local coords: u along the wind's "from" bearing, v to its right. */
+function poly(dir, pts) {
+  const a = (dir * Math.PI) / 180;
+  const [s, c] = [Math.sin(a), Math.cos(a)];
+  return `M${pts.map(([u, v]) => `${+(u * s + v * c).toFixed(2)} ${+(-u * c + v * s).toFixed(2)}`).join('L')}Z`;
+}
+
+export const POINTERS = ['arrow', 'needle', 'compass', 'none'];
+
+/** Current-direction pointer. All styles mark the side the wind comes FROM. */
+export function pointerSvg(style, dir, R) {
+  switch (POINTERS.includes(style) ? style : 'arrow') {
+    case 'none':
+      return '';
+    case 'needle':
+      // Compass needle through the centre: coloured head toward "from", plain tail opposite.
+      return `<path class="needle-tail" d="${poly(dir, [[-(R - 6), 0], [0, -5], [0, 5]])}"/>`
+        + `<path class="needle-head" d="${poly(dir, [[R - 4, 0], [0, -5], [0, 5]])}"/>`
+        + '<circle class="needle-cap" r="3.5"/>';
+    case 'compass':
+      // Wide arrow from the rim to the centre, pointing where the wind blows to.
+      return `<path class="arrow" d="${poly(dir, [[R - 2, -4], [R - 2, 4], [32, 4], [32, 12], [8, 0], [32, -12], [32, -4]])}"/>`;
+    default:
+      // Triangle on the rim pointing in, with a dashed guide to the centre.
+      return `<line class="guide" x2="${pt(R - 15, dir)[0]}" y2="${pt(R - 15, dir)[1]}"/>`
+        + `<path class="arrow" d="${poly(dir, [[R - 15, 0], [R + 5, -13], [R + 5, 13]])}"/>`;
+  }
+}
+
+const LABELS = {
+  entity: 'Wind speed', direction_entity: 'Wind direction (degrees)', gust_entity: 'Gust', rain_entity: 'Rain',
+  name: 'Name', window: 'Heat-map window', direction_offset: 'Direction offset', max_speed: 'Max speed (0 = auto)',
+  smooth: 'Heat-map softness', pointer: 'Pointer style', pointer_color: 'Pointer colour (CSS)',
+  show_rings: 'Speed rings', show_spokes: 'Spokes', show_scale: 'Scale label', rings: 'Ring count',
+  sectors: 'Prevailing bins', max_width: 'Max size', tap_action: 'Tap action',
+};
+
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const Base = globalThis.HTMLElement ?? class {};
 
@@ -180,14 +237,42 @@ class WindRoseCard extends Base {
         { name: 'name', selector: { text: {} } },
         {
           type: 'grid', name: '', schema: [
-            { name: 'hours', selector: { number: { min: 1, max: 48, mode: 'box' } } },
+            {
+              name: 'window',
+              selector: {
+                select: {
+                  mode: 'dropdown', custom_value: true,
+                  options: ['15m', '30m', '1h', '2h', '3h', '6h', '12h', '24h'],
+                },
+              },
+            },
+            { name: 'direction_offset', selector: { number: { min: -180, max: 180, step: 1, mode: 'box', unit_of_measurement: '°' } } },
             { name: 'max_speed', selector: { number: { min: 0, mode: 'box' } } },
-            { name: 'sectors', selector: { select: { options: ['8', '16', '32'] } } },
-            { name: 'rings', selector: { number: { min: 2, max: 12, mode: 'box' } } },
+            { name: 'smooth', selector: { number: { min: 2, max: 25, step: 1, mode: 'slider' } } },
+          ],
+        },
+        {
+          type: 'expandable', name: '', title: 'Appearance', schema: [
+            {
+              name: 'pointer',
+              selector: { select: { mode: 'dropdown', options: POINTERS } },
+            },
+            { name: 'pointer_color', selector: { text: {} } },
+            {
+              type: 'grid', name: '', schema: [
+                { name: 'show_rings', selector: { boolean: {} } },
+                { name: 'show_spokes', selector: { boolean: {} } },
+                { name: 'show_scale', selector: { boolean: {} } },
+                { name: 'rings', selector: { number: { min: 2, max: 12, mode: 'box' } } },
+                { name: 'sectors', selector: { select: { options: ['8', '16', '32'] } } },
+                { name: 'max_width', selector: { number: { min: 120, max: 1000, mode: 'box', unit_of_measurement: 'px' } } },
+              ],
+            },
           ],
         },
         { name: 'tap_action', selector: { ui_action: {} } },
       ],
+      computeLabel: (s) => LABELS[s.name],
     };
   }
 
@@ -196,7 +281,7 @@ class WindRoseCard extends Base {
       throw new Error('entity (wind speed) and direction_entity are required');
     }
     this._config = {
-      hours: 1, sectors: 16, rings: 5, calm: 0.5, refresh: 60, ...config,
+      sectors: 16, rings: 5, calm: 0.5, refresh: 60, ...config,
     };
     this._config.sectors = Number(this._config.sectors);
     this._rose = null;
@@ -230,7 +315,7 @@ class WindRoseCard extends Base {
     this._fetchedAt = Date.now();
     const c = this._config;
     const end = Date.now();
-    const start = end - c.hours * 3600 * 1000;
+    const start = end - windowMinutes(c) * 60 * 1000;
     try {
       const res = await this._hass.callWS({
         type: 'history/history_during_period',
@@ -241,7 +326,8 @@ class WindRoseCard extends Base {
         no_attributes: true,
         significant_changes_only: false,
       });
-      this._rose = computeRose(toSeries(res[c.entity]), toSeries(res[c.direction_entity]), {
+      const dirs = toSeries(res[c.direction_entity]).map((p) => ({ t: p.t, v: withOffset(p.v, c.direction_offset) }));
+      this._rose = computeRose(toSeries(res[c.entity]), dirs, {
         start, end, sectors: c.sectors, rings: c.rings, maxSpeed: c.max_speed, calm: c.calm,
         // Auto scale also fits the current speed and gust, so their markers stay inside the rose.
         atLeast: Math.max(0, ...[c.entity, c.gust_entity].map((id) => parseFloat(this._hass.states[id]?.state)).filter(Number.isFinite)),
@@ -280,7 +366,7 @@ class WindRoseCard extends Base {
     const gu = c.gust_entity ? hass.states[c.gust_entity] : null;
     const unit = sp?.attributes?.unit_of_measurement || '';
     const speed = parseFloat(sp?.state);
-    const dir = parseFloat(dr?.state);
+    const dir = withOffset(parseFloat(dr?.state), c.direction_offset);
     const gust = parseFloat(gu?.state);
     const raining = c.rain_entity ? isRaining(hass.states[c.rain_entity]) : false;
     const tappable = (c.tap_action?.action ?? 'more-info') !== 'none';
@@ -295,25 +381,22 @@ class WindRoseCard extends Base {
     const heat = this._heat
       ? `<image href="${this._heat}" x="${-R}" y="${-R}" width="${2 * R}" height="${2 * R}" preserveAspectRatio="none"/>` : '';
 
-    let grid = '';
-    for (let r = 1; r <= c.rings; r++) grid += `<circle r="${(R * r) / c.rings}"/>`;
-    for (let a = 0; a < 360; a += 45) { const [x, y] = pt(R, a); grid += `<line x2="${x}" y2="${y}"/>`; }
+    // Grid is decoration only: ring count/visibility never touches the heat map.
+    // The outer rim always stays so the rose keeps its outline.
+    let grid = `<circle r="${R}"/>`;
+    if (c.show_rings !== false) for (let r = 1; r < c.rings; r++) grid += `<circle r="${(R * r) / c.rings}"/>`;
+    if (c.show_spokes !== false) for (let a = 0; a < 360; a += 45) { const [x, y] = pt(R, a); grid += `<line x2="${x}" y2="${y}"/>`; }
     const labels = [0, 90, 180, 270].map((a) => {
       const [x, y] = pt(R + 10, a);
       return `<text class="card" x="${x}" y="${y}">${L.dirs[a / 22.5]}</text>`;
     }).join('');
     // Rim speed, just outside the ring at the lower right.
     const [sx, sy] = pt(R + 7, 135);
-    const scale = `<text class="scale" x="${sx}" y="${sy}">${nf.format(max)}</text>`;
+    const scale = c.show_scale === false ? '' : `<text class="scale" x="${sx}" y="${sy}">${nf.format(max)}</text>`;
 
     let marker = '';
     if (Number.isFinite(dir)) {
-      // Arrow on the rim where the wind comes from, pointing into the rose, with a guide to the centre.
-      const [ax, ay] = pt(R - 15, dir);
-      const [bx, by] = pt(R + 5, dir - 9);
-      const [cx, cy] = pt(R + 5, dir + 9);
-      const [lx, ly] = pt(R - 15, dir);
-      marker = `<line class="guide" x2="${lx}" y2="${ly}"/><path class="arrow" d="M${ax} ${ay}L${bx} ${by}L${cx} ${cy}Z"/>`;
+      marker = pointerSvg(c.pointer, dir, R);
       if (Number.isFinite(gust)) { const [x, y] = pt(rr(gust), dir); marker += `<circle class="gust" cx="${x}" cy="${y}" r="4.5"/>`; }
       if (Number.isFinite(speed)) { const [x, y] = pt(rr(speed), dir); marker += `<circle class="now" cx="${x}" cy="${y}" r="4.5"/>`; }
     }
@@ -333,7 +416,7 @@ class WindRoseCard extends Base {
     const corners = corner(-98, -92, 'start', `${esc(c.name || L.wind)}${rain}`, `${big}${u(` ${unit}`)}`)
       + corner(98, -92, 'end', L.direction, Number.isFinite(dir) ? `${dirName(dir)} ${u(`${Math.round(dir)}°`)}` : u(L.unavailable))
       + (Number.isFinite(gust) ? corner(-98, 78, 'start', L.gust, `${nf.format(gust)}${u(` ${gu.attributes?.unit_of_measurement || unit}`)}`) : '')
-      + (hist ? corner(98, 78, 'end', L.window(c.hours), hist) : '');
+      + (hist ? corner(98, 78, 'end', windowLabel(lang, windowMinutes(c)), hist) : '');
 
     if (!this._root) {
       this._root = this.attachShadow({ mode: 'open' });
@@ -345,7 +428,8 @@ class WindRoseCard extends Base {
     }
     this._root.innerHTML = `
 <style>
-  ha-card { display: block; padding: 8px; height: 100%; box-sizing: border-box; }
+  ha-card { display: block; padding: 8px; height: 100%; box-sizing: border-box;
+    --wr-pointer: ${/^[#\w(),.%\s-]+$/.test(c.pointer_color ?? '') ? c.pointer_color : 'var(--primary-text-color)'}; }
   svg { display: block; width: 100%; max-width: ${c.max_width ?? 380}px; margin: 0 auto; height: auto; aspect-ratio: 1; }
   .grid circle, .grid line { fill: none; stroke: var(--divider-color, #8884); stroke-width: .6; }
   text { fill: var(--secondary-text-color); dominant-baseline: central; font-family: inherit; }
@@ -356,7 +440,9 @@ class WindRoseCard extends Base {
   tspan.unit { font-size: 7.5px; fill: var(--secondary-text-color); }
   tspan.rain { fill: var(--info-color, #039be5); }
   tspan.err { fill: var(--error-color, #db4437); }
-  .arrow { fill: var(--primary-text-color); stroke: var(--card-background-color, #fff); stroke-width: 1; stroke-linejoin: round; }
+  .arrow, .needle-head { fill: var(--wr-pointer); stroke: var(--card-background-color, #fff); stroke-width: 1; stroke-linejoin: round; }
+  .needle-tail { fill: var(--secondary-text-color); opacity: .6; }
+  .needle-cap { fill: var(--wr-pointer); stroke: var(--card-background-color, #fff); stroke-width: 1; }
   .guide { stroke: var(--primary-text-color); stroke-width: 1; stroke-dasharray: 2 2; opacity: .55; }
   .now { fill: var(--primary-text-color); stroke: var(--card-background-color, #fff); stroke-width: 1.5; }
   .gust { fill: none; stroke: var(--primary-text-color); stroke-width: 1.5; stroke-dasharray: 2 1.5; }

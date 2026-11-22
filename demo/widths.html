@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Wind Rose widths</title>
+<style>
+  body { margin: 0; padding: 16px; background: #111; display: flex; gap: 12px; align-items: flex-start;
+    --primary-text-color: #e1e1e1; --secondary-text-color: #9b9b9b; --divider-color: #ffffff1f; --card-background-color: #1c1c1c; font-family: Roboto, system-ui, sans-serif; }
+  ha-card { background: var(--card-background-color); border-radius: 12px; border: 1px solid var(--divider-color); }
+</style>
+</head>
+<body>
+<script type="module">
+  import '../pt2vhf-wind-rose-card.js';
+  // Same card at the widths a Sections dashboard gives 3, 6 and 12 columns.
+  const now = Date.now() / 1000;
+  const sp = [], dr = [];
+  let seed = 7; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (let t = now - 3600; t < now; t += 30) {
+    sp.push({ s: String(2 + rnd() * 4), lu: t });
+    dr.push({ s: String((330 + (rnd() - 0.5) * 60 + 360) % 360), lu: t });
+  }
+  const hass = {
+    language: 'pt-BR', locale: { language: 'pt-BR' },
+    states: {
+      'sensor.wind_speed': { state: '3', attributes: { unit_of_measurement: 'km/h' } },
+      'sensor.wind_direction': { state: '332', attributes: {} },
+      'sensor.wind_gust': { state: '6.5', attributes: { unit_of_measurement: 'km/h' } },
+      'binary_sensor.is_raining': { state: 'on', attributes: {} },
+    },
+    callWS: async () => ({ 'sensor.wind_speed': sp, 'sensor.wind_direction': dr }),
+  };
+  for (const w of [165, 330, 520]) {
+    const box = document.createElement('div');
+    box.style.width = `${w}px`;
+    const c = document.createElement('pt2vhf-wind-rose-card');
+    c.setConfig({ entity: 'sensor.wind_speed', direction_entity: 'sensor.wind_direction', gust_entity: 'sensor.wind_gust', rain_entity: 'binary_sensor.is_raining', name: 'Vento', sectors: 32 });
+    c.hass = hass;
+    box.append(c);
+    document.body.append(box);
+  }
+</script>
+</body>
+</html>

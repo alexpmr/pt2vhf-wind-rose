@@ -4,7 +4,7 @@
  * comes FROM, distance from the centre = speed, colour = how much time it blew there.
  * https://github.com/alexpmr/pt2vhf-wind-rose
  */
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 const TAG = 'pt2vhf-wind-rose-card';
 
 const STR = {
@@ -12,11 +12,13 @@ const STR = {
     dirs: ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'],
     gust: 'Gust', prevailing: 'Prevailing', avg: 'Avg', max: 'Max', calm: 'Calm',
     window: (h) => (h === 1 ? 'Last hour' : `Last ${h} h`), nodata: 'No history yet', unavailable: 'Unavailable',
+    raining: 'Raining',
   },
   pt: {
     dirs: ['N', 'NNE', 'NE', 'ENE', 'L', 'ESE', 'SE', 'SSE', 'S', 'SSO', 'SO', 'OSO', 'O', 'ONO', 'NO', 'NNO'],
     gust: 'Rajada', prevailing: 'Predominante', avg: 'Média', max: 'Máx', calm: 'Calmaria',
     window: (h) => (h === 1 ? 'Última hora' : `Últimas ${h} h`), nodata: 'Sem histórico ainda', unavailable: 'Indisponível',
+    raining: 'Chovendo',
   },
 };
 
@@ -30,6 +32,14 @@ export function toSeries(rows) {
     .map((r) => ({ t: (r.lu ?? r.lc) * 1000, v: parseFloat(r.s) }))
     .filter((p) => Number.isFinite(p.t))
     .sort((a, b) => a.t - b.t);
+}
+
+/** Rain from a binary_sensor ("on") or a numeric sensor (rate/amount > 0). */
+export function isRaining(stateObj) {
+  const s = stateObj?.state;
+  if (s === 'on') return true;
+  const n = parseFloat(s);
+  return Number.isFinite(n) && n > 0;
 }
 
 export function niceMax(v) {
@@ -126,6 +136,7 @@ class WindRoseCard extends Base {
         { name: 'entity', required: true, selector: { entity: { domain: 'sensor' } } },
         { name: 'direction_entity', required: true, selector: { entity: { domain: 'sensor' } } },
         { name: 'gust_entity', selector: { entity: { domain: 'sensor' } } },
+        { name: 'rain_entity', selector: { entity: { domain: ['binary_sensor', 'sensor'] } } },
         { name: 'name', selector: { text: {} } },
         {
           type: 'grid', name: '', schema: [
@@ -135,6 +146,7 @@ class WindRoseCard extends Base {
             { name: 'rings', selector: { number: { min: 2, max: 12, mode: 'box' } } },
           ],
         },
+        { name: 'tap_action', selector: { ui_action: {} } },
       ],
     };
   }
@@ -159,12 +171,13 @@ class WindRoseCard extends Base {
 
   getCardSize() { return 3; }
 
-  getGridOptions() { return { columns: 6, rows: 3, min_columns: 6, min_rows: 2 }; }
+  // Full width by default, height follows content (rows: auto) so nothing gets clipped.
+  getGridOptions() { return { columns: 12, min_columns: 3 }; }
 
   _update(force) {
     if (!this._config || !this._hass) return;
     const c = this._config;
-    const watched = [c.entity, c.direction_entity, c.gust_entity].map((id) => this._hass.states[id]);
+    const watched = [c.entity, c.direction_entity, c.gust_entity, c.rain_entity].map((id) => this._hass.states[id]);
     const changed = force || watched.some((s, k) => s !== this._last?.[k]);
     this._last = watched;
     if (Date.now() - this._fetchedAt > c.refresh * 1000) this._fetch();
@@ -200,6 +213,17 @@ class WindRoseCard extends Base {
     this._render();
   }
 
+  // HA's frontend runs the standard action (more-info, navigate, toggle, ...) for "hass-action".
+  _tap() {
+    const c = this._config;
+    if ((c.tap_action?.action ?? 'more-info') === 'none') return;
+    this.dispatchEvent(new CustomEvent('hass-action', {
+      bubbles: true,
+      composed: true,
+      detail: { config: { entity: c.entity, tap_action: c.tap_action ?? { action: 'more-info' } }, action: 'tap' },
+    }));
+  }
+
   _render() {
     const c = this._config;
     const hass = this._hass;
@@ -213,6 +237,8 @@ class WindRoseCard extends Base {
     const speed = parseFloat(sp?.state);
     const dir = parseFloat(dr?.state);
     const gust = parseFloat(gu?.state);
+    const raining = c.rain_entity ? isRaining(hass.states[c.rain_entity]) : false;
+    const tappable = (c.tap_action?.action ?? 'more-info') !== 'none';
     const rose = this._rose;
     const R = 80;
     const max = rose?.max || c.max_speed || niceMax(Math.max(speed || 0, gust || 0, 1));
@@ -238,7 +264,9 @@ class WindRoseCard extends Base {
       const [x, y] = pt(R + 11, a);
       return `<text x="${x}" y="${y}">${L.dirs[a / 22.5]}</text>`;
     }).join('');
-    const scale = `<text class="scale" x="3" y="${-R + 7}">${nf.format(max)}</text>`;
+    // Rim speed, outside the ring at the lower right, away from the N/E/S/W labels.
+    const [sx, sy] = pt(R + 8, 135);
+    const scale = `<text class="scale" x="${sx}" y="${sy}">${nf.format(max)} ${esc(unit)}</text>`;
 
     let marker = '';
     if (Number.isFinite(dir)) {
@@ -262,11 +290,27 @@ class WindRoseCard extends Base {
     if (this._error) stats.push(`<span class="err">${esc(this._error)}</span>`);
 
     const big = Number.isFinite(speed) ? nf.format(speed) : '—';
-    this._root ??= this.attachShadow({ mode: 'open' });
+    if (!this._root) {
+      this._root = this.attachShadow({ mode: 'open' });
+      // Listeners live on the shadow root so they survive innerHTML re-renders.
+      this._root.addEventListener('click', () => this._tap());
+      this._root.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this._tap(); }
+      });
+    }
     this._root.innerHTML = `
 <style>
-  ha-card { padding: 12px 14px; display: flex; gap: 14px; align-items: center; height: 100%; box-sizing: border-box; }
+  ha-card { display: block; padding: 12px 14px; height: 100%; box-sizing: border-box; container-type: inline-size; }
+  .wrap { display: flex; gap: 16px; align-items: center; justify-content: center; }
   svg { flex: 0 0 auto; width: 148px; height: 148px; overflow: visible; }
+  .info > * { white-space: nowrap; }
+  /* Narrow column: rose on top, values below, centred. */
+  @container (max-width: 300px) {
+    .wrap { flex-direction: column; gap: 8px; }
+    svg { width: min(100%, 180px); height: auto; aspect-ratio: 1; }
+    .info { align-items: center; text-align: center; }
+    .hist { align-items: center; }
+  }
   .grid circle, .grid line { fill: none; stroke: var(--divider-color, #8884); stroke-width: .6; }
   text { fill: var(--secondary-text-color); font-size: 11px; text-anchor: middle; dominant-baseline: central; }
   text.scale { font-size: 8px; text-anchor: start; }
@@ -282,8 +326,14 @@ class WindRoseCard extends Base {
   .hist .t { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
   b { color: var(--primary-text-color); font-weight: 500; }
   .err { color: var(--error-color, #db4437); font-size: 11px; }
+  ha-card.tap { cursor: pointer; }
+  ha-card:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+  .name-row { display: flex; align-items: center; gap: 8px; }
+  .rain { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; color: var(--info-color, #039be5); white-space: nowrap; }
+  .rain ha-icon { --mdc-icon-size: 16px; }
 </style>
-<ha-card>
+<ha-card class="${tappable ? 'tap' : ''}" ${tappable ? 'role="button" tabindex="0"' : ''}>
+  <div class="wrap">
   <svg viewBox="-100 -100 200 200" role="img" aria-label="${esc(`${big} ${unit} ${Number.isFinite(dir) ? dirName(dir) : ''}`)}">
     <defs>
       <filter id="soft" x="-10%" y="-10%" width="120%" height="120%"><feGaussianBlur stdDeviation="${c.smooth ?? 2}"/></filter>
@@ -294,11 +344,13 @@ class WindRoseCard extends Base {
     ${labels}${scale}${marker}
   </svg>
   <div class="info">
-    ${c.name ? `<div class="name">${esc(c.name)}</div>` : ''}
+    ${c.name || raining ? `<div class="name-row">${c.name ? `<div class="name">${esc(c.name)}</div>` : ''}${raining
+      ? `<span class="rain"><ha-icon icon="mdi:weather-rainy"></ha-icon>${L.raining}</span>` : ''}</div>` : ''}
     <div class="now-v">${big}<small>${esc(unit)}</small></div>
     <div class="dir">${Number.isFinite(dir) ? `${dirName(dir)} · ${Math.round(dir)}°` : L.unavailable}</div>
     ${Number.isFinite(gust) ? `<div>${L.gust} <b>${nf.format(gust)}</b> ${esc(gu.attributes?.unit_of_measurement || unit)}</div>` : ''}
     ${stats.length ? `<div class="hist"><span class="t">${L.window(c.hours)}</span>${stats.map((s) => `<span>${s}</span>`).join('')}</div>` : ''}
+  </div>
   </div>
 </ha-card>`;
   }

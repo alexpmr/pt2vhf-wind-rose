@@ -31,15 +31,18 @@
       'sensor.wind_speed': { state: '3', attributes: { unit_of_measurement: 'km/h', device_class: 'wind_speed' } },
       'sensor.wind_direction': { state: '339', attributes: { unit_of_measurement: '°' } },
       'sensor.wind_gust': { state: '4', attributes: { unit_of_measurement: 'km/h' } },
+      'binary_sensor.is_raining': { state: lang === 'pt-BR' ? 'on' : 'off', attributes: {} },
     },
     callWS: async () => ({ 'sensor.wind_speed': sp, 'sensor.wind_direction': dr }),
   });
   for (const [id, lang] of [['d', 'pt-BR'], ['l', 'en']]) {
     const c = document.createElement('pt2vhf-wind-rose-card');
-    c.setConfig({ entity: 'sensor.wind_speed', direction_entity: 'sensor.wind_direction', gust_entity: 'sensor.wind_gust', name: 'Vento' });
+    c.setConfig({ entity: 'sensor.wind_speed', direction_entity: 'sensor.wind_direction', gust_entity: 'sensor.wind_gust', rain_entity: 'binary_sensor.is_raining', name: 'Vento' });
     c.hass = mk(lang);
     document.getElementById(id).append(c);
   }
+  window.actions = [];
+  window.addEventListener('hass-action', (e) => window.actions.push(e.detail));
 </script>
 </body>
 </html>

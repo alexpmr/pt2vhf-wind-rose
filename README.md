@@ -12,7 +12,7 @@ The rose is a polar heat map:
 
 On top of it, a solid dot marks the current wind, a dashed ring marks the current gust and an arrow on the rim points in from the current direction. Beside the rose: current speed, direction (cardinal + degrees), gust, and for the window: prevailing direction, average, max and % of calm.
 
-Works in light and dark themes, in English and Portuguese (follows the HA language), and in the Sections dashboard.
+Works in light and dark themes, in English and Portuguese (follows the HA language), in masonry and Sections dashboards. In narrow columns (under ~300 px) the values move below the rose.
 
 ## Install
 
@@ -43,6 +43,8 @@ hours: 1                             # history window (default 1)
 | `entity` | — | Wind speed sensor. Its unit is shown as is. |
 | `direction_entity` | — | Wind direction sensor, numeric degrees. |
 | `gust_entity` | — | Gust sensor (optional). |
+| `rain_entity` | — | Rain sensor (optional): a `binary_sensor` (`on`) or a numeric rate/amount (> 0). Shows a "Raining" badge only while it rains. |
+| `tap_action` | `more-info` | Standard Home Assistant action on tap (`more-info` of the speed sensor by default, `navigate`, `none`, …). |
 | `name` | — | Title above the values. |
 | `hours` | `1` | Window of history used for the heat map. |
 | `max_speed` | auto | Speed at the rim. Auto picks a round value above the window's peak. |

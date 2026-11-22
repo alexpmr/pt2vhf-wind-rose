@@ -1,6 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeRose, toSeries, sectorOf, niceMax } from '../pt2vhf-wind-rose-card.js';
+import { computeRose, toSeries, sectorOf, niceMax, isRaining } from '../pt2vhf-wind-rose-card.js';
+
+test('isRaining accepts binary "on" and positive numbers only', () => {
+  assert.equal(isRaining({ state: 'on' }), true);
+  assert.equal(isRaining({ state: 'off' }), false);
+  assert.equal(isRaining({ state: '0.4' }), true);
+  assert.equal(isRaining({ state: '0' }), false);
+  assert.equal(isRaining({ state: 'unavailable' }), false);
+  assert.equal(isRaining(undefined), false);
+});
 
 const H = 3600 * 1000;
 const start = 0;

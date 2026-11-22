@@ -14,10 +14,12 @@ Works in light and dark themes, in English and Portuguese (follows the HA langua
 
 ## Install
 
-### HACS (custom repository)
+### Home Assistant Marketplace (2026.11+)
 
-1. HACS → ⋮ → **Custom repositories** → URL `https://github.com/alexpmr/pt2vhf-wind-rose`, type **Dashboard**.
-2. Search for **PT2VHF Wind Rose**, download, reload the browser.
+1. **Settings → Marketplace → Add from link**, enter `alexpmr/pt2vhf-wind-rose` (type **Dashboard** if asked). A GitHub connection is required.
+2. Install **PT2VHF Wind Rose** and reload the browser. The Marketplace adds the dashboard resource for you (unless your resources are managed in YAML).
+
+Older Home Assistant with HACS: add the same URL as a custom repository, type **Dashboard**.
 
 ### Manual
 

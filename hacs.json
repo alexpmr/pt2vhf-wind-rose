@@ -1,0 +1,6 @@
+{
+  "name": "PT2VHF Wind Rose",
+  "filename": "pt2vhf-wind-rose-card.js",
+  "render_readme": true,
+  "homeassistant": "2024.1.0"
+}

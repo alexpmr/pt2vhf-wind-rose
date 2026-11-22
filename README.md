@@ -49,7 +49,7 @@ pointer: arrow                       # arrow | needle | compass | none
 | `name` | Wind | Label of the speed corner. |
 | `window` | `1h` | History window of the heat map: minutes or hours, e.g. `15m`, `30m`, `1h`, `1.5h`, `24h` (a plain number = minutes). |
 | `hours` | `1` | Older way to set the window in whole hours; ignored when `window` is set. |
-| `direction_offset` | `0` | Degrees added to the direction sensor (may be negative), for vanes not aligned with true north. Applies to the pointer, the heat map and the text. |
+| `direction_offset` | `0` | Rotates the whole rose clockwise by this many degrees (N/E/S/W labels, grid, heat map and pointer) so it matches how the viewer faces the dashboard. Display only: measured values and the direction text stay true. |
 | `max_speed` | auto | Speed at the rim. Auto picks a round value above the window's peak. |
 | `sectors` | `16` | Direction bins used for the prevailing direction: 8, 16 or 32. |
 | `rings` | `5` | Number of speed circles drawn on the grid (never changes the heat map). |

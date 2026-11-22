@@ -4,7 +4,7 @@
  * comes FROM, distance from the centre = speed, colour = how much time it blew there.
  * https://github.com/alexpmr/pt2vhf-wind-rose
  */
-const VERSION = '0.5.0';
+const VERSION = '0.5.1';
 const TAG = 'pt2vhf-wind-rose-card';
 
 const STR = {
@@ -208,7 +208,7 @@ export function pointerSvg(style, dir, R) {
 
 const LABELS = {
   entity: 'Wind speed', direction_entity: 'Wind direction (degrees)', gust_entity: 'Gust', rain_entity: 'Rain',
-  name: 'Name', window: 'Heat-map window', direction_offset: 'Direction offset', max_speed: 'Max speed (0 = auto)',
+  name: 'Name', window: 'Heat-map window', direction_offset: 'Rotate rose (display only)', max_speed: 'Max speed (0 = auto)',
   smooth: 'Heat-map softness', pointer: 'Pointer style', pointer_color: 'Pointer colour (CSS)',
   show_rings: 'Speed rings', show_spokes: 'Spokes', show_scale: 'Scale label', rings: 'Ring count',
   sectors: 'Prevailing bins', max_width: 'Max size', tap_action: 'Tap action',
@@ -326,8 +326,7 @@ class WindRoseCard extends Base {
         no_attributes: true,
         significant_changes_only: false,
       });
-      const dirs = toSeries(res[c.direction_entity]).map((p) => ({ t: p.t, v: withOffset(p.v, c.direction_offset) }));
-      this._rose = computeRose(toSeries(res[c.entity]), dirs, {
+      this._rose = computeRose(toSeries(res[c.entity]), toSeries(res[c.direction_entity]), {
         start, end, sectors: c.sectors, rings: c.rings, maxSpeed: c.max_speed, calm: c.calm,
         // Auto scale also fits the current speed and gust, so their markers stay inside the rose.
         atLeast: Math.max(0, ...[c.entity, c.gust_entity].map((id) => parseFloat(this._hass.states[id]?.state)).filter(Number.isFinite)),
@@ -366,7 +365,11 @@ class WindRoseCard extends Base {
     const gu = c.gust_entity ? hass.states[c.gust_entity] : null;
     const unit = sp?.attributes?.unit_of_measurement || '';
     const speed = parseFloat(sp?.state);
-    const dir = withOffset(parseFloat(dr?.state), c.direction_offset);
+    const dir = parseFloat(dr?.state);
+    // direction_offset only rotates the drawing (clockwise) to match how the viewer faces the
+    // dashboard; measured values and the text stay true.
+    const off = withOffset(0, c.direction_offset);
+    const view = (a) => withOffset(a, off);
     const gust = parseFloat(gu?.state);
     const raining = c.rain_entity ? isRaining(hass.states[c.rain_entity]) : false;
     const tappable = (c.tap_action?.action ?? 'more-info') !== 'none';
@@ -379,26 +382,27 @@ class WindRoseCard extends Base {
 
     // The grid spans [-1, 1]² of the unit disc, i.e. exactly the rose's bounding square.
     const heat = this._heat
-      ? `<image href="${this._heat}" x="${-R}" y="${-R}" width="${2 * R}" height="${2 * R}" preserveAspectRatio="none"/>` : '';
+      ? `<image href="${this._heat}" x="${-R}" y="${-R}" width="${2 * R}" height="${2 * R}" preserveAspectRatio="none"${
+        off ? ` transform="rotate(${off})"` : ''}/>` : '';
 
     // Grid is decoration only: ring count/visibility never touches the heat map.
     // The outer rim always stays so the rose keeps its outline.
     let grid = `<circle r="${R}"/>`;
     if (c.show_rings !== false) for (let r = 1; r < c.rings; r++) grid += `<circle r="${(R * r) / c.rings}"/>`;
-    if (c.show_spokes !== false) for (let a = 0; a < 360; a += 45) { const [x, y] = pt(R, a); grid += `<line x2="${x}" y2="${y}"/>`; }
+    if (c.show_spokes !== false) for (let a = 0; a < 360; a += 45) { const [x, y] = pt(R, view(a)); grid += `<line x2="${x}" y2="${y}"/>`; }
     const labels = [0, 90, 180, 270].map((a) => {
-      const [x, y] = pt(R + 10, a);
+      const [x, y] = pt(R + 10, view(a));
       return `<text class="card" x="${x}" y="${y}">${L.dirs[a / 22.5]}</text>`;
     }).join('');
     // Rim speed, just outside the ring at the lower right.
-    const [sx, sy] = pt(R + 7, 135);
+    const [sx, sy] = pt(R + 7, view(135)); // rotates with the rose, always between E and S
     const scale = c.show_scale === false ? '' : `<text class="scale" x="${sx}" y="${sy}">${nf.format(max)}</text>`;
 
     let marker = '';
     if (Number.isFinite(dir)) {
-      marker = pointerSvg(c.pointer, dir, R);
-      if (Number.isFinite(gust)) { const [x, y] = pt(rr(gust), dir); marker += `<circle class="gust" cx="${x}" cy="${y}" r="4.5"/>`; }
-      if (Number.isFinite(speed)) { const [x, y] = pt(rr(speed), dir); marker += `<circle class="now" cx="${x}" cy="${y}" r="4.5"/>`; }
+      marker = pointerSvg(c.pointer, view(dir), R);
+      if (Number.isFinite(gust)) { const [x, y] = pt(rr(gust), view(dir)); marker += `<circle class="gust" cx="${x}" cy="${y}" r="4.5"/>`; }
+      if (Number.isFinite(speed)) { const [x, y] = pt(rr(speed), view(dir)); marker += `<circle class="now" cx="${x}" cy="${y}" r="4.5"/>`; }
     }
 
     // Numbers live in the four corners, outside the rose, as secondary information.

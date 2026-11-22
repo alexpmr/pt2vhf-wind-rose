@@ -1,8 +1,69 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  computeRose, toSeries, sectorOf, niceMax, isRaining, density, withOffset, windowMinutes, windowLabel, pointerSvg,
+  computeRose, toSeries, sectorOf, niceMax, isRaining, density, withOffset, windowMinutes, windowLabel, pointerSvg, plume, WindRoseCard, DEFAULTS,
 } from '../pt2vhf-wind-rose-card.js';
+
+// Value of an n×n grid at polar (rho in unit radius, bearing in degrees; 0 = N, clockwise).
+const at = (g, n, rho, deg) => {
+  const a = (deg * Math.PI) / 180;
+  const i = Math.floor(((rho * Math.sin(a) + 1) / 2) * n);
+  const j = Math.floor(((-rho * Math.cos(a) + 1) / 2) * n);
+  return g[j * n + i];
+};
+
+test('plume: a steady wind paints from the centre out to its speed, then fades', () => {
+  const n = 96;
+  const g = plume([[0.66, 90]], n, 10);
+  // Very close to the centre one grid cell spans several degrees, so start the check at 0.2.
+  const ray = [0.2, 0.3, 0.5, 0.6, 0.72, 0.85].map((r) => at(g, n, r, 90));
+  for (let k = 0; k < 4; k++) assert.ok(ray[k] > 0.9, `full up to the speed ${ray}`);
+  assert.ok(ray[4] < 0.05 && ray[5] < 0.05, `empty past the speed ${ray}`);
+  assert.ok(at(g, n, 0.5, 270) < 0.01, 'opposite side stays empty');
+});
+
+test('plume: equal time from N and S → equal heat at the centre, stronger one reaches further', () => {
+  const n = 96;
+  const pts = [...Array(50).fill([0.2, 0]), ...Array(50).fill([0.6, 180])];
+  const g = plume(pts, n, 10);
+  const nIn = at(g, n, 0.1, 0);
+  const sIn = at(g, n, 0.1, 180);
+  assert.ok(Math.abs(nIn - sIn) < 0.05, `centre ${nIn} vs ${sIn}`);
+  assert.ok(at(g, n, 0.4, 0) < 0.05, 'N plume ends near 0.2');
+  assert.ok(at(g, n, 0.4, 180) > 0.9, 'S plume still strong at 0.4');
+});
+
+test('plume: wraps at north, symmetric around it', () => {
+  const n = 96;
+  const g = plume([[0.5, 355], [0.5, 5]], n, 8);
+  assert.ok(at(g, n, 0.3, 0) > 0.9);
+  assert.ok(Math.abs(at(g, n, 0.3, 20) - at(g, n, 0.3, 340)) < 0.05);
+  assert.ok(plume([], 8, 8).every((v) => v === 0));
+});
+
+test('new-card YAML lists every option of the visual editor, with the defaults the card uses', () => {
+  const names = [];
+  const walk = (schema) => schema.forEach((s) => (s.schema ? walk(s.schema) : names.push(s.name)));
+  walk(WindRoseCard.getConfigForm().schema);
+  const stub = WindRoseCard.getStubConfig({ states: {} });
+  for (const n of names) assert.ok(n in stub, `missing in stub: ${n}`);
+  for (const [k, v] of Object.entries(DEFAULTS)) assert.deepEqual(stub[k], v, k);
+});
+
+test('setConfig fills defaults but an old "hours" config still wins over the default window', () => {
+  const card = new WindRoseCard();
+  card.setConfig({ entity: 'sensor.s', direction_entity: 'sensor.d', hours: 3 });
+  assert.equal(windowMinutes(card._config), 180);
+  assert.equal(card._config.show_rings, true);
+  card.setConfig({ entity: 'sensor.s', direction_entity: 'sensor.d' });
+  assert.equal(windowMinutes(card._config), 60);
+  assert.equal(card._config.heat_mode, 'plume');
+});
+
+test('computeRose exposes polar samples (r in unit radius, degrees)', () => {
+  const r = computeRose([{ t: 0, v: 5 }], [{ t: 0, v: 90 }], { start, end, maxSpeed: 10 });
+  assert.deepEqual(r.polar[0], [0.5, 90]);
+});
 
 test('withOffset adds degrees and wraps to [0, 360)', () => {
   assert.equal(withOffset(350, 20), 10);

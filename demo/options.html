@@ -36,7 +36,8 @@
   };
   const base = { entity: 'sensor.wind_speed', direction_entity: 'sensor.wind_direction', gust_entity: 'sensor.wind_gust', name: 'Vento' };
   const cases = [
-    ['pointer: arrow', {}],
+    ['plume (default)', {}],
+    ['heat_mode: spots', { heat_mode: 'spots' }],
     ['pointer: needle', { pointer: 'needle' }],
     ['pointer: compass', { pointer: 'compass' }],
     ['pointer: chevron', { pointer: 'chevron' }],

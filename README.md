@@ -4,11 +4,13 @@ A compact Home Assistant Lovelace card that shows **where the wind is coming fro
 
 ![PT2VHF Wind Rose in dark and light themes](images/preview.png)
 
-The rose is a continuous polar heat map (a smooth density of every sample, with no sector or ring edges):
+The rose is a polar heat map that grows **from the centre outward** (`heat_mode: plume`, default):
 
 - **angle** = direction the wind comes *from* (meteorological convention)
-- **distance from the centre** = speed (calm in the middle, strong at the rim)
-- **colour** = share of time the wind blew there (blue = rare → red = most of the time)
+- **distance from the centre** = speed: every sample paints its direction from the centre out to the speed it reached, so each plume shows where the wind came from and how strong it got
+- **colour** = share of time the wind came from that direction and reached at least that speed (blue = rare → red = most of the time)
+
+`heat_mode: spots` draws the older look instead: a soft spot at each sample's direction and speed.
 
 On top of it, a large arrow on the rim points in from the current direction, a solid dot marks the current wind and a dashed ring the current gust. The rose fills the card; the numbers sit quietly in the corners: current speed (and a rain note), direction, gust, and the window's prevailing direction and max.
 
@@ -31,13 +33,41 @@ Copy `pt2vhf-wind-rose-card.js` to `config/www/`, then add a dashboard resource 
 
 ```yaml
 type: custom:pt2vhf-wind-rose-card
-entity: sensor.wind_speed            # required – wind speed
+# Sensors
+entity: sensor.wind_speed             # required – wind speed
 direction_entity: sensor.wind_bearing # required – direction in degrees (0 = N)
-gust_entity: sensor.wind_gust        # optional
-name: Wind                           # optional
-window: 1h                           # heat-map window: 15m, 30m, 1h, 6h, 24h…
-pointer: arrow                       # arrow | chevron | dart | needle | compass | vane | none
+gust_entity: sensor.wind_gust         # optional
+rain_entity: binary_sensor.raining    # optional
+name: Wind
+# Heat map
+window: 1h                # 15m, 30m, 1h, 2h, 3h, 6h, 12h, 24h
+heat_mode: plume          # plume | spots
+smooth: 8                 # softness
+calm: 0.5                 # speeds below this are left out
+max_speed: 0              # 0 = auto scale
+# Orientation
+direction_offset: 0       # rotate the whole rose clockwise (display only)
+# Pointer
+pointer: arrow            # arrow | chevron | dart | needle | compass | vane | none
+pointer_color: ''         # empty = text colour
+show_guide: true
+show_speed: true
+show_gust: true
+# Grid
+show_rim: true
+show_rings: true
+show_spokes: true
+show_scale: true
+rings: 5
+sectors: 16
+# Size and refresh
+max_width: 380
+refresh: 60
+tap_action:
+  action: more-info
 ```
+
+A new card added from the card picker starts with this full list (the same options as the visual editor), so every setting is there to change later.
 
 | Option | Default | Description |
 | --- | --- | --- |
@@ -51,7 +81,7 @@ pointer: arrow                       # arrow | chevron | dart | needle | compass
 | `hours` | `1` | Older way to set the window in whole hours; ignored when `window` is set. |
 | `direction_offset` | `0` | Rotates the whole rose clockwise by this many degrees (N/E/S/W labels, grid, heat map and pointer) so it matches how the viewer faces the dashboard. Display only: measured values and the direction text stay true. |
 | `max_speed` | auto | Speed at the rim. Auto picks a round value above the window's peak. |
-| `sectors` | `16` | Direction bins used for the prevailing direction: 8, 16 or 32. |
+| `sectors` | `16` | Direction bins used for the prevailing direction (4–64). |
 | `rings` | `5` | Number of speed circles drawn on the grid (never changes the heat map). |
 | `show_guide` | `true` | Dashed line from the arrow to the centre (`arrow` pointer only). |
 | `show_speed` | `true` | Solid dot at the current speed, in the current direction (distance from the centre = speed). |
@@ -64,7 +94,8 @@ pointer: arrow                       # arrow | chevron | dart | needle | compass
 | `pointer_color` | text colour | Any CSS colour for the pointer, e.g. `#e8553e` or `var(--accent-color)`. |
 | `calm` | `0.5` | Speeds below this count as calm and are left out of the heat map. |
 | `max_width` | `380` | Maximum size of the rose in px on wide cards. |
-| `smooth` | `8` | Spread of each sample in the heat map, in % of the radius (lower = more detail, higher = softer). |
+| `heat_mode` | `plume` | `plume`: heat grows from the centre out to the speed reached in each direction. `spots`: a soft spot at each sample. |
+| `smooth` | `8` | Softness of the heat map: angular spread of the plumes (≈ 1.25° per unit) or size of the spots (% of the radius). |
 | `refresh` | `60` | Seconds between history reloads. |
 
 The card reads history through the recorder (`history/history_during_period`), so both sensors must be recorded. Direction sensors that report text (e.g. `NW`) are not supported — use a numeric degree sensor.

@@ -4,7 +4,7 @@
  * comes FROM, distance from the centre = speed, colour = how much time it blew there.
  * https://github.com/alexpmr/pt2vhf-wind-rose
  */
-const VERSION = '0.6.0';
+const VERSION = '0.7.0';
 const TAG = 'pt2vhf-wind-rose-card';
 
 const STR = {
@@ -96,6 +96,7 @@ export function computeRose(speed, dir, { start, end, sectors = 16, rings = 5, m
   const counts = Array.from({ length: sectors }, () => new Array(rings).fill(0));
   const bySector = new Array(sectors).fill(0);
   const points = [];
+  const polar = [];
   let calmN = 0;
   let sum = 0;
   for (const [s, d] of samples) {
@@ -104,6 +105,7 @@ export function computeRose(speed, dir, { start, end, sectors = 16, rings = 5, m
     const r = Math.min(1, s / max);
     const rad = (d * Math.PI) / 180;
     points.push([r * Math.sin(rad), -r * Math.cos(rad)]);
+    polar.push([r, d]);
     const a = sectorOf(d, sectors);
     counts[a][Math.min(rings - 1, Math.floor((s / max) * rings))]++;
     bySector[a]++;
@@ -111,7 +113,7 @@ export function computeRose(speed, dir, { start, end, sectors = 16, rings = 5, m
   const total = samples.length;
   const best = bySector.indexOf(Math.max(...bySector));
   return {
-    counts, total, max, peak, points,
+    counts, total, max, peak, points, polar,
     calm: total ? calmN / total : 0,
     avg: total ? sum / total : 0,
     prevailing: total > calmN ? best : -1,
@@ -143,6 +145,62 @@ export function density(points, n = 96, sigma = 0.08) {
   for (const v of g) if (v > top) top = v;
   if (top > 0) for (let k = 0; k < g.length; k++) g[k] /= top;
   return g;
+}
+
+/**
+ * Radial "plume" heat map on an n×n grid over [-1, 1]² (row 0 = top), normalised to 1.
+ * Each sample [r, deg] paints the whole ray from the centre out to its speed r (soft tip),
+ * so intensity at (bearing, radius) = time the wind came from ~bearing AND reached at least
+ * that radius. Smoothed across bearings with a Gaussian of sigmaDeg; wraps at north.
+ */
+export function plume(polar, n = 96, sigmaDeg = 10, tip = 0.04) {
+  const B = 360; // 1° bearing bins
+  const K = 64; // radial levels
+  const E = new Float32Array(B * K);
+  for (const [r, d] of polar) {
+    const b = Math.round(withOffset(d, 0)) % B;
+    for (let k = 0; k < K; k++) {
+      const t = Math.min(1, Math.max(0, ((r - (k + 0.5) / K) / tip) * 0.5 + 0.5));
+      if (t === 0) break;
+      E[b * K + k] += t * t * (3 - 2 * t); // smoothstep: plume fades just past its speed
+    }
+  }
+  // Circular Gaussian blur across bearings.
+  const w = Math.max(1, Math.ceil(3 * sigmaDeg));
+  const kern = Array.from({ length: 2 * w + 1 }, (_, o) => Math.exp(-((o - w) ** 2) / (2 * sigmaDeg * sigmaDeg)));
+  const P = new Float32Array(B * K);
+  for (let b = 0; b < B; b++) {
+    for (let o = -w; o <= w; o++) {
+      const src = ((b + o) % B + B) % B;
+      const g = kern[o + w];
+      for (let k = 0; k < K; k++) P[b * K + k] += g * E[src * K + k];
+    }
+  }
+  // Sample the polar table on the cartesian grid (bilinear in bearing and radius).
+  const out = new Float32Array(n * n);
+  let top = 0;
+  for (let j = 0; j < n; j++) {
+    const y = ((j + 0.5) * 2) / n - 1;
+    for (let i = 0; i < n; i++) {
+      const x = ((i + 0.5) * 2) / n - 1;
+      const rho = Math.hypot(x, y);
+      if (rho > 1) continue;
+      const phi = withOffset((Math.atan2(x, -y) * 180) / Math.PI, 0);
+      const b0 = Math.floor(phi) % B;
+      const b1 = (b0 + 1) % B;
+      const tb = phi - Math.floor(phi);
+      const kf = Math.min(K - 1, Math.max(0, rho * K - 0.5));
+      const k0 = Math.floor(kf);
+      const k1 = Math.min(K - 1, k0 + 1);
+      const tk = kf - k0;
+      const v = (P[b0 * K + k0] * (1 - tb) + P[b1 * K + k0] * tb) * (1 - tk)
+        + (P[b0 * K + k1] * (1 - tb) + P[b1 * K + k1] * tb) * tk;
+      out[j * n + i] = v;
+      if (v > top) top = v;
+    }
+  }
+  if (top > 0) for (let k = 0; k < out.length; k++) out[k] /= top;
+  return out;
 }
 
 function rgbAt(f) {
@@ -221,26 +279,55 @@ export function pointerSvg(style, dir, R, { guide = true } = {}) {
 const LABELS = {
   entity: 'Wind speed', direction_entity: 'Wind direction (degrees)', gust_entity: 'Gust', rain_entity: 'Rain',
   name: 'Name', window: 'Heat-map window', direction_offset: 'Rotate rose (display only)', max_speed: 'Max speed (0 = auto)',
-  smooth: 'Heat-map softness', pointer: 'Pointer style', pointer_color: 'Pointer colour (CSS)',
+  heat_mode: 'Heat-map style', smooth: 'Heat-map softness', pointer: 'Pointer style', pointer_color: 'Pointer colour (CSS)',
   show_guide: 'Arrow guide line', show_speed: 'Current speed dot', show_gust: 'Gust ring', show_rim: 'Outer circle', show_rings: 'Speed rings', show_spokes: 'Spokes', show_scale: 'Scale label', rings: 'Ring count',
-  sectors: 'Prevailing bins', max_width: 'Max size', tap_action: 'Tap action',
+  sectors: 'Prevailing bins', calm: 'Calm below (speed)', refresh: 'History refresh', max_width: 'Max size', tap_action: 'Tap action',
 };
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const Base = globalThis.HTMLElement ?? class {};
 
-class WindRoseCard extends Base {
+/** Every optional setting with the value the card uses when it is missing. */
+export const DEFAULTS = {
+  window: '1h',
+  heat_mode: 'plume',
+  smooth: 8,
+  calm: 0.5,
+  max_speed: 0,
+  direction_offset: 0,
+  pointer: 'arrow',
+  pointer_color: '',
+  show_guide: true,
+  show_speed: true,
+  show_gust: true,
+  show_rim: true,
+  show_rings: true,
+  show_spokes: true,
+  show_scale: true,
+  rings: 5,
+  sectors: 16,
+  max_width: 380,
+  refresh: 60,
+  tap_action: { action: 'more-info' },
+};
+
+export class WindRoseCard extends Base {
+  // A new card's YAML lists every option (same set as the visual editor), so it can be edited later.
   static getStubConfig(hass) {
     const ids = Object.keys(hass?.states || {});
     const dc = (cls) => ids.find((id) => hass.states[id].attributes?.device_class === cls);
     return {
       entity: dc('wind_speed') || '',
       direction_entity: ids.find((id) => /wind.*(dir|bearing)|(dir|bearing).*wind/i.test(id)) || '',
+      gust_entity: ids.find((id) => /wind.*gust|gust/i.test(id)) || '',
+      rain_entity: '',
+      name: '',
+      ...structuredClone(DEFAULTS),
     };
   }
 
   static getConfigForm() {
-    return {
+    const form = {
       schema: [
         { name: 'entity', required: true, selector: { entity: { domain: 'sensor' } } },
         { name: 'direction_entity', required: true, selector: { entity: { domain: 'sensor' } } },
@@ -260,6 +347,7 @@ class WindRoseCard extends Base {
             },
             { name: 'direction_offset', selector: { number: { min: -180, max: 180, step: 1, mode: 'box', unit_of_measurement: '°' } } },
             { name: 'max_speed', selector: { number: { min: 0, mode: 'box' } } },
+            { name: 'heat_mode', selector: { select: { mode: 'dropdown', options: ['plume', 'spots'] } } },
             { name: 'smooth', selector: { number: { min: 2, max: 25, step: 1, mode: 'slider' } } },
           ],
         },
@@ -280,7 +368,9 @@ class WindRoseCard extends Base {
                 { name: 'show_spokes', selector: { boolean: {} } },
                 { name: 'show_scale', selector: { boolean: {} } },
                 { name: 'rings', selector: { number: { min: 2, max: 12, mode: 'box' } } },
-                { name: 'sectors', selector: { select: { options: ['8', '16', '32'] } } },
+                { name: 'sectors', selector: { number: { min: 4, max: 64, mode: 'box' } } },
+                { name: 'calm', selector: { number: { min: 0, max: 5, step: 0.1, mode: 'box' } } },
+                { name: 'refresh', selector: { number: { min: 10, max: 3600, mode: 'box', unit_of_measurement: 's' } } },
                 { name: 'max_width', selector: { number: { min: 120, max: 1000, mode: 'box', unit_of_measurement: 'px' } } },
               ],
             },
@@ -290,6 +380,10 @@ class WindRoseCard extends Base {
       ],
       computeLabel: (s) => LABELS[s.name],
     };
+    // Show the real defaults (e.g. toggles that are on) even when a key is missing from the YAML.
+    const fill = (schema) => schema.forEach((s) => (s.schema ? fill(s.schema) : (s.name in DEFAULTS && (s.default = DEFAULTS[s.name]))));
+    fill(form.schema);
+    return form;
   }
 
   setConfig(config) {
@@ -297,9 +391,12 @@ class WindRoseCard extends Base {
       throw new Error('entity (wind speed) and direction_entity are required');
     }
     this._config = {
-      sectors: 16, rings: 5, calm: 0.5, refresh: 60, ...config,
+      ...structuredClone(DEFAULTS),
+      ...config,
     };
-    this._config.sectors = Number(this._config.sectors);
+    // A config that only sets the older 'hours' keeps using it.
+    if (config.window == null && config.hours != null) delete this._config.window;
+    this._config.sectors = Number(this._config.sectors) || 16;
     this._rose = null;
     this._fetchedAt = 0;
     if (this._hass) this._update(true);
@@ -349,7 +446,10 @@ class WindRoseCard extends Base {
       });
       // The heat image is built once per history refresh, not on every state update.
       this._heat = this._rose.points.length
-        ? heatImage(density(this._rose.points, HEAT_GRID, (c.smooth ?? 8) / 100), HEAT_GRID) : '';
+        ? heatImage(c.heat_mode === 'spots'
+          ? density(this._rose.points, HEAT_GRID, (c.smooth ?? 8) / 100)
+          // smooth 8 ≈ 10° of angular spread for the plumes
+          : plume(this._rose.polar, HEAT_GRID, (c.smooth ?? 8) * 1.25), HEAT_GRID) : '';
       this._error = null;
     } catch (e) {
       this._error = e?.message || String(e);

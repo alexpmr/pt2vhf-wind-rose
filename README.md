@@ -2,6 +2,8 @@
 
 A compact Home Assistant Lovelace card that shows **where the wind is coming from, how strong it is, and what it did over the last hour** — in one glance.
 
+![PT2VHF Wind Rose in dark and light themes](images/preview.png)
+
 The rose is a polar heat map:
 
 - **angle** = direction the wind comes *from* (meteorological convention)
@@ -55,7 +57,7 @@ The card reads history through the recorder (`history/history_during_period`), s
 ## Development
 
 ```sh
-node --test test/   # unit tests for the binning math
+node --test test/*.test.mjs   # unit tests for the binning math
 ```
 
 `demo/index.html` renders the card with a simulated `hass` object; serve the folder with any static server and open it.

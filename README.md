@@ -53,7 +53,8 @@ pointer: arrow                       # arrow | needle | compass | none
 | `max_speed` | auto | Speed at the rim. Auto picks a round value above the window's peak. |
 | `sectors` | `16` | Direction bins used for the prevailing direction: 8, 16 or 32. |
 | `rings` | `5` | Number of speed circles drawn on the grid (never changes the heat map). |
-| `show_rings` | `true` | Show the inner speed circles (the outer rim always stays). |
+| `show_rim` | `true` | Show the outer circle (the rose outline). |
+| `show_rings` | `true` | Show the inner speed circles. |
 | `show_spokes` | `true` | Show the 8 radial lines. |
 | `show_scale` | `true` | Show the rim speed label. |
 | `pointer` | `arrow` | Current-direction pointer: `arrow` (triangle on the rim + guide), `needle` (compass needle through the centre), `compass` (wide arrow from the rim to the centre) or `none`. All mark the side the wind comes from. |

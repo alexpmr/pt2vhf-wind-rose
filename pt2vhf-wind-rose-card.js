@@ -4,7 +4,7 @@
  * comes FROM, distance from the centre = speed, colour = how much time it blew there.
  * https://github.com/alexpmr/pt2vhf-wind-rose
  */
-const VERSION = '0.5.1';
+const VERSION = '0.5.2';
 const TAG = 'pt2vhf-wind-rose-card';
 
 const STR = {
@@ -210,7 +210,7 @@ const LABELS = {
   entity: 'Wind speed', direction_entity: 'Wind direction (degrees)', gust_entity: 'Gust', rain_entity: 'Rain',
   name: 'Name', window: 'Heat-map window', direction_offset: 'Rotate rose (display only)', max_speed: 'Max speed (0 = auto)',
   smooth: 'Heat-map softness', pointer: 'Pointer style', pointer_color: 'Pointer colour (CSS)',
-  show_rings: 'Speed rings', show_spokes: 'Spokes', show_scale: 'Scale label', rings: 'Ring count',
+  show_rim: 'Outer circle', show_rings: 'Speed rings', show_spokes: 'Spokes', show_scale: 'Scale label', rings: 'Ring count',
   sectors: 'Prevailing bins', max_width: 'Max size', tap_action: 'Tap action',
 };
 
@@ -260,6 +260,7 @@ class WindRoseCard extends Base {
             { name: 'pointer_color', selector: { text: {} } },
             {
               type: 'grid', name: '', schema: [
+                { name: 'show_rim', selector: { boolean: {} } },
                 { name: 'show_rings', selector: { boolean: {} } },
                 { name: 'show_spokes', selector: { boolean: {} } },
                 { name: 'show_scale', selector: { boolean: {} } },
@@ -386,8 +387,7 @@ class WindRoseCard extends Base {
         off ? ` transform="rotate(${off})"` : ''}/>` : '';
 
     // Grid is decoration only: ring count/visibility never touches the heat map.
-    // The outer rim always stays so the rose keeps its outline.
-    let grid = `<circle r="${R}"/>`;
+    let grid = c.show_rim === false ? '' : `<circle r="${R}"/>`;
     if (c.show_rings !== false) for (let r = 1; r < c.rings; r++) grid += `<circle r="${(R * r) / c.rings}"/>`;
     if (c.show_spokes !== false) for (let a = 0; a < 360; a += 45) { const [x, y] = pt(R, view(a)); grid += `<line x2="${x}" y2="${y}"/>`; }
     const labels = [0, 90, 180, 270].map((a) => {

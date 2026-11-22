@@ -16,6 +16,24 @@ On top of it, a large arrow on the rim points in from the current direction, a s
 
 Works in light and dark themes, in English and Portuguese (follows the HA language), in masonry and Sections dashboards. Everything scales with the card width.
 
+## Gallery
+
+**Pointer styles** — `pointer:` all mark the side the wind comes from.
+
+![Pointer styles: arrow, chevron, dart, needle, compass, vane, none](images/pointers.png)
+
+**Heat map** — plumes grow from the centre out to the speed reached; `plume_width` and `plume_fade` shape them, `spots` is the alternative look.
+
+![Heat map modes: plume, wider plume, sharp tips, spots](images/heat.png)
+
+**Grid, rotation and colour** — hide any part of the grid, rotate the whole rose to match how you face the dashboard, colour the pointer.
+
+![Grid toggles, direction_offset and pointer_color](images/grid.png)
+
+**Any width** — everything scales with the card, from a narrow column to full width.
+
+![The card at 165, 300 and 420 px](images/sizes.png)
+
 ## Install
 
 ### Home Assistant Marketplace (2026.11+)
@@ -110,7 +128,7 @@ The card reads history through the recorder (`history/history_during_period`), s
 node --test test/*.test.mjs   # unit tests for the rose and density math
 ```
 
-`demo/index.html` renders the card with a simulated `hass` object; serve the folder with any static server and open it.
+`demo/index.html` renders the card with a simulated `hass` object; serve the folder with any static server and open it. `demo/gallery.html?set=pointers|heat|grid|sizes` renders the README images.
 
 ## License
 

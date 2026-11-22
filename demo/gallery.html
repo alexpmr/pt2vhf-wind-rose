@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Wind Rose gallery</title>
+<style>
+  /* Renders one README image per ?set=… (pointers, heat, grid, sizes) with the simulated hass below. */
+  body { margin: 0; padding: 14px; background: #111; display: flex; gap: 12px; align-items: flex-start;
+    --primary-text-color: #e1e1e1; --secondary-text-color: #9b9b9b; --divider-color: #ffffff1f; --card-background-color: #1c1c1c;
+    font-family: Roboto, system-ui, sans-serif; }
+  body.light { background: #f3f3f3; --primary-text-color: #212121; --secondary-text-color: #727272; --divider-color: #0000001f; --card-background-color: #fff; }
+  figure { margin: 0; color: var(--secondary-text-color); font: 13px/1.3 Roboto, system-ui, sans-serif; }
+  figcaption { margin-top: 2px; text-align: center; }
+  figcaption code { color: var(--primary-text-color); font: 12px ui-monospace, Consolas, monospace; }
+</style>
+</head>
+<body>
+<script type="module">
+  import '../pt2vhf-wind-rose-card.js';
+  const set = new URLSearchParams(location.search).get('set') || 'pointers';
+  const now = Date.now() / 1000;
+  const sp = [], dr = [];
+  let seed = 11; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (let t = now - 3600; t < now; t += 20) {
+    const r = rnd();
+    const d = r < 0.6 ? 320 + (rnd() - 0.5) * 50 : r < 0.85 ? 20 + (rnd() - 0.5) * 30 : 250 + (rnd() - 0.5) * 30;
+    sp.push({ s: String(r < 0.6 ? 2 + rnd() * 7 : 1 + rnd() * 4), lu: t });
+    dr.push({ s: String((d + 360) % 360), lu: t });
+  }
+  const hass = (lang) => ({
+    language: lang, locale: { language: lang },
+    states: {
+      'sensor.wind_speed': { state: '4.2', attributes: { unit_of_measurement: 'km/h' } },
+      'sensor.wind_direction': { state: '318', attributes: {} },
+      'sensor.wind_gust': { state: '7.5', attributes: { unit_of_measurement: 'km/h' } },
+      'binary_sensor.rain': { state: 'off', attributes: {} },
+    },
+    callWS: async () => ({ 'sensor.wind_speed': sp, 'sensor.wind_direction': dr }),
+  });
+  const base = { entity: 'sensor.wind_speed', direction_entity: 'sensor.wind_direction', gust_entity: 'sensor.wind_gust', name: 'Wind' };
+  const sets = {
+    pointers: ['arrow', 'chevron', 'dart', 'needle', 'compass', 'vane', 'none']
+      .map((p) => [`pointer: ${p}`, { pointer: p }]),
+    heat: [
+      ['heat_mode: plume', {}],
+      ['plume_width: 25', { plume_width: 25 }],
+      ['plume_fade: 0', { plume_fade: 0 }],
+      ['heat_mode: spots', { heat_mode: 'spots' }],
+    ],
+    grid: [
+      ['default grid', {}],
+      ['rings + spokes off', { show_rings: false, show_spokes: false }],
+      ['rim, rings, spokes off', { show_rim: false, show_rings: false, show_spokes: false, show_scale: false }],
+      ['direction_offset: 45', { direction_offset: 45 }],
+      ["pointer_color: '#e8553e'", { pointer: 'needle', pointer_color: '#e8553e' }],
+    ],
+    sizes: [[165, 'narrow column'], [300, 'half width'], [420, 'full width']]
+      .map(([w, l]) => [`${l} (${w} px)`, {}, w]),
+  };
+  if (new URLSearchParams(location.search).get('theme') === 'light') document.body.classList.add('light');
+  for (const [label, cfg, w] of sets[set]) {
+    const f = document.createElement('figure');
+    f.style.width = `${w ?? 200}px`;
+    const c = document.createElement('pt2vhf-wind-rose-card');
+    c.setConfig({ ...base, ...cfg });
+    c.hass = hass('en');
+    const cap = document.createElement('figcaption');
+    const code = document.createElement('code');
+    code.textContent = label;
+    cap.append(code);
+    f.append(c, cap);
+    document.body.append(f);
+  }
+</script>
+</body>
+</html>

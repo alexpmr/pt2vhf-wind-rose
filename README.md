@@ -42,7 +42,9 @@ name: Wind
 # Heat map
 window: 1h                # 15m, 30m, 1h, 2h, 3h, 6h, 12h, 24h
 heat_mode: plume          # plume | spots
-smooth: 8                 # softness
+plume_width: 15           # plume thickness (degrees)
+plume_fade: 40            # how gradually each plume tip fades (% of radius)
+smooth: 8                 # spot softness (heat_mode: spots)
 calm: 0.5                 # speeds below this are left out
 max_speed: 0              # 0 = auto scale
 # Orientation
@@ -95,7 +97,9 @@ A new card added from the card picker starts with this full list (the same optio
 | `calm` | `0.5` | Speeds below this count as calm and are left out of the heat map. |
 | `max_width` | `380` | Maximum size of the rose in px on wide cards. |
 | `heat_mode` | `plume` | `plume`: heat grows from the centre out to the speed reached in each direction. `spots`: a soft spot at each sample. |
-| `smooth` | `8` | Softness of the heat map: angular spread of the plumes (≈ 1.25° per unit) or size of the spots (% of the radius). |
+| `plume_width` | `15` | Plume thickness in degrees: higher merges nearby directions and hides thin streaks. |
+| `plume_fade` | `40` | How gradually each plume tip fades, in % of the radius: higher removes hard arcs (useful with sensors that report speed in steps); 0 = sharp tip. |
+| `smooth` | `8` | Spot size for `heat_mode: spots` (% of the radius). |
 | `refresh` | `60` | Seconds between history reloads. |
 
 The card reads history through the recorder (`history/history_during_period`), so both sensors must be recorded. Direction sensors that report text (e.g. `NW`) are not supported — use a numeric degree sensor.

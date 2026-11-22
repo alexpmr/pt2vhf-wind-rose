@@ -4,7 +4,7 @@
  * comes FROM, distance from the centre = speed, colour = how much time it blew there.
  * https://github.com/alexpmr/pt2vhf-wind-rose
  */
-const VERSION = '0.7.0';
+const VERSION = '0.7.1';
 const TAG = 'pt2vhf-wind-rose-card';
 
 const STR = {
@@ -279,7 +279,7 @@ export function pointerSvg(style, dir, R, { guide = true } = {}) {
 const LABELS = {
   entity: 'Wind speed', direction_entity: 'Wind direction (degrees)', gust_entity: 'Gust', rain_entity: 'Rain',
   name: 'Name', window: 'Heat-map window', direction_offset: 'Rotate rose (display only)', max_speed: 'Max speed (0 = auto)',
-  heat_mode: 'Heat-map style', smooth: 'Heat-map softness', pointer: 'Pointer style', pointer_color: 'Pointer colour (CSS)',
+  heat_mode: 'Heat-map style', plume_width: 'Plume thickness', plume_fade: 'Plume tip fade', smooth: 'Spot softness', pointer: 'Pointer style', pointer_color: 'Pointer colour (CSS)',
   show_guide: 'Arrow guide line', show_speed: 'Current speed dot', show_gust: 'Gust ring', show_rim: 'Outer circle', show_rings: 'Speed rings', show_spokes: 'Spokes', show_scale: 'Scale label', rings: 'Ring count',
   sectors: 'Prevailing bins', calm: 'Calm below (speed)', refresh: 'History refresh', max_width: 'Max size', tap_action: 'Tap action',
 };
@@ -291,6 +291,8 @@ const Base = globalThis.HTMLElement ?? class {};
 export const DEFAULTS = {
   window: '1h',
   heat_mode: 'plume',
+  plume_width: 15,
+  plume_fade: 40,
   smooth: 8,
   calm: 0.5,
   max_speed: 0,
@@ -348,6 +350,8 @@ export class WindRoseCard extends Base {
             { name: 'direction_offset', selector: { number: { min: -180, max: 180, step: 1, mode: 'box', unit_of_measurement: '°' } } },
             { name: 'max_speed', selector: { number: { min: 0, mode: 'box' } } },
             { name: 'heat_mode', selector: { select: { mode: 'dropdown', options: ['plume', 'spots'] } } },
+            { name: 'plume_width', selector: { number: { min: 2, max: 45, step: 1, mode: 'slider', unit_of_measurement: '°' } } },
+            { name: 'plume_fade', selector: { number: { min: 0, max: 80, step: 1, mode: 'slider', unit_of_measurement: '%' } } },
             { name: 'smooth', selector: { number: { min: 2, max: 25, step: 1, mode: 'slider' } } },
           ],
         },
@@ -448,8 +452,9 @@ export class WindRoseCard extends Base {
       this._heat = this._rose.points.length
         ? heatImage(c.heat_mode === 'spots'
           ? density(this._rose.points, HEAT_GRID, (c.smooth ?? 8) / 100)
-          // smooth 8 ≈ 10° of angular spread for the plumes
-          : plume(this._rose.polar, HEAT_GRID, (c.smooth ?? 8) * 1.25), HEAT_GRID) : '';
+          // plume_width = angular thickness (σ, degrees); plume_fade = tip fade length, % of the radius
+          : plume(this._rose.polar, HEAT_GRID, Math.max(1, Number(c.plume_width) || 15),
+            Math.max(0.01, (Number(c.plume_fade) || 0) / 200)), HEAT_GRID) : '';
       this._error = null;
     } catch (e) {
       this._error = e?.message || String(e);

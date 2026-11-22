@@ -33,6 +33,24 @@ test('plume: equal time from N and S → equal heat at the centre, stronger one 
   assert.ok(at(g, n, 0.4, 180) > 0.9, 'S plume still strong at 0.4');
 });
 
+test('plume: width (degrees) makes plumes thicker', () => {
+  const n = 96;
+  const thin = plume([[0.6, 90]], n, 5);
+  const thick = plume([[0.6, 90]], n, 20);
+  assert.ok(at(thin, n, 0.4, 110) < 0.1, `thin at 20° off ${at(thin, n, 0.4, 110)}`);
+  assert.ok(at(thick, n, 0.4, 110) > 0.4, `thick at 20° off ${at(thick, n, 0.4, 110)}`);
+});
+
+test('plume: fade softens the tip instead of a hard arc', () => {
+  const n = 96;
+  const hard = plume([[0.5, 90]], n, 10, 0.02);
+  const soft = plume([[0.5, 90]], n, 10, 0.2);
+  assert.ok(at(hard, n, 0.58, 90) < 0.02, 'hard tip ends right after the speed');
+  const v = at(soft, n, 0.58, 90);
+  assert.ok(v > 0.1 && v < 0.9, `soft tip fades gradually ${v}`);
+  assert.ok(at(soft, n, 0.2, 90) > 0.9, 'still full near the centre');
+});
+
 test('plume: wraps at north, symmetric around it', () => {
   const n = 96;
   const g = plume([[0.5, 355], [0.5, 5]], n, 8);

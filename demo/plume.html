@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Wind Rose plumes</title>
+<style>
+  body { margin: 0; padding: 16px; background: #111; display: grid; grid-template-columns: repeat(4, 240px); gap: 12px;
+    --primary-text-color: #e1e1e1; --secondary-text-color: #9b9b9b; --divider-color: #ffffff1f; --card-background-color: #1c1c1c; font-family: Roboto, system-ui, sans-serif; }
+  figure { margin: 0; color: #9b9b9b; font-size: 12px; }
+  figcaption { margin-top: 4px; text-align: center; }
+</style>
+</head>
+<body>
+<script type="module">
+  import '../pt2vhf-wind-rose-card.js';
+  // Light wind in 1.1 km/h steps from scattered directions, like a real cup anemometer at low speed.
+  const now = Date.now() / 1000;
+  const sp = [], dr = [];
+  let seed = 5; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (let t = now - 3600; t < now; t += 30) {
+    const r = rnd();
+    const d = r < 0.55 ? 330 + (rnd() - 0.5) * 40 : r < 0.8 ? 15 + (rnd() - 0.5) * 30 : r < 0.92 ? 225 : 290;
+    sp.push({ s: String(1.1 * Math.ceil(rnd() * 3)), lu: t });
+    dr.push({ s: String((d + 360) % 360), lu: t });
+  }
+  const hass = {
+    language: 'pt-BR', locale: { language: 'pt-BR' },
+    states: {
+      'sensor.wind_speed': { state: '1.1', attributes: { unit_of_measurement: 'km/h' } },
+      'sensor.wind_direction': { state: '325', attributes: {} },
+    },
+    callWS: async () => ({ 'sensor.wind_speed': sp, 'sensor.wind_direction': dr }),
+  };
+  const base = {
+    entity: 'sensor.wind_speed', direction_entity: 'sensor.wind_direction', name: 'Vento',
+    direction_offset: 45, pointer: 'dart', show_rings: false, show_spokes: false,
+  };
+  const cases = [
+    ['v0.7.0: width 11, fade ~8', { plume_width: 11, plume_fade: 8 }],
+    ['width 15, fade 40 (default)', {}],
+    ['width 18, fade 25', { plume_width: 18 }],
+    ['width 18, fade 50', { plume_width: 18, plume_fade: 50 }],
+  ];
+  for (const [label, cfg] of cases) {
+    const f = document.createElement('figure');
+    const c = document.createElement('pt2vhf-wind-rose-card');
+    c.setConfig({ ...base, ...cfg });
+    c.hass = hass;
+    const cap = document.createElement('figcaption');
+    cap.textContent = label;
+    f.append(c, cap);
+    document.body.append(f);
+  }
+</script>
+</body>
+</html>

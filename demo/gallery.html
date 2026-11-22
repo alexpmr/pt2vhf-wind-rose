@@ -55,10 +55,18 @@
       ['direction_offset: 45', { direction_offset: 45 }],
       ["pointer_color: '#e8553e'", { pointer: 'needle', pointer_color: '#e8553e' }],
     ],
+    // 2×2 square for social posts.
+    social: [
+      ['plume + arrow', {}, 290],
+      ["vane, '#e8553e'", { pointer: 'vane', pointer_color: '#e8553e', show_rings: false, show_spokes: false }, 290],
+      ['needle, rotated 45°', { pointer: 'needle', direction_offset: 45, show_spokes: false }, 290],
+      ['minimal: dart, no grid', { pointer: 'dart', show_rim: false, show_rings: false, show_spokes: false, show_scale: false }, 290],
+    ],
     sizes: [[165, 'narrow column'], [300, 'half width'], [420, 'full width']]
       .map(([w, l]) => [`${l} (${w} px)`, {}, w]),
   };
   if (new URLSearchParams(location.search).get('theme') === 'light') document.body.classList.add('light');
+  if (set === 'social') Object.assign(document.body.style, { flexWrap: 'wrap', width: '604px', gap: '10px 14px' });
   for (const [label, cfg, w] of sets[set]) {
     const f = document.createElement('figure');
     f.style.width = `${w ?? 200}px`;

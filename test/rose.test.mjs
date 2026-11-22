@@ -37,10 +37,17 @@ test('windowLabel in pt and en', () => {
 
 test('pointerSvg: every style draws, none draws nothing, unknown falls back to arrow', () => {
   assert.equal(pointerSvg('none', 90, 80), '');
-  for (const s of ['arrow', 'needle', 'compass']) assert.match(pointerSvg(s, 90, 80), /<path/);
+  for (const s of ['arrow', 'chevron', 'dart', 'needle', 'compass', 'vane']) assert.match(pointerSvg(s, 90, 80), /<path/);
   assert.equal(pointerSvg('bogus', 90, 80), pointerSvg('arrow', 90, 80));
   // Wind from the east (90°): arrow tip sits on the +x axis inside the rim.
   assert.match(pointerSvg('arrow', 90, 80), /d="M65 0L/);
+});
+
+test('pointerSvg: the arrow guide line can be turned off', () => {
+  assert.match(pointerSvg('arrow', 90, 80), /class="guide"/);
+  const noGuide = pointerSvg('arrow', 90, 80, { guide: false });
+  assert.doesNotMatch(noGuide, /class="guide"/);
+  assert.match(noGuide, /class="arrow"/);
 });
 
 test('ring count never changes the heat map', () => {

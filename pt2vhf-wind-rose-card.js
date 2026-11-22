@@ -4,7 +4,7 @@
  * comes FROM, distance from the centre = speed, colour = how much time it blew there.
  * https://github.com/alexpmr/pt2vhf-wind-rose
  */
-const VERSION = '0.5.2';
+const VERSION = '0.6.0';
 const TAG = 'pt2vhf-wind-rose-card';
 
 const STR = {
@@ -184,10 +184,10 @@ function poly(dir, pts) {
   return `M${pts.map(([u, v]) => `${+(u * s + v * c).toFixed(2)} ${+(-u * c + v * s).toFixed(2)}`).join('L')}Z`;
 }
 
-export const POINTERS = ['arrow', 'needle', 'compass', 'none'];
+export const POINTERS = ['arrow', 'chevron', 'dart', 'needle', 'compass', 'vane', 'none'];
 
 /** Current-direction pointer. All styles mark the side the wind comes FROM. */
-export function pointerSvg(style, dir, R) {
+export function pointerSvg(style, dir, R, { guide = true } = {}) {
   switch (POINTERS.includes(style) ? style : 'arrow') {
     case 'none':
       return '';
@@ -196,12 +196,24 @@ export function pointerSvg(style, dir, R) {
       return `<path class="needle-tail" d="${poly(dir, [[-(R - 6), 0], [0, -5], [0, 5]])}"/>`
         + `<path class="needle-head" d="${poly(dir, [[R - 4, 0], [0, -5], [0, 5]])}"/>`
         + '<circle class="needle-cap" r="3.5"/>';
+    case 'chevron':
+      // Open "V" on the rim pointing in: light, doesn't hide the heat map.
+      return `<path class="chevron" d="${poly(dir, [[R + 5, -13], [R - 14, 0], [R + 5, 13]]).slice(0, -1)}"/>`;
+    case 'dart':
+      // Slim notched arrowhead on the rim pointing in.
+      return `<path class="arrow" d="${poly(dir, [[R - 18, 0], [R + 5, -10], [R - 1, 0], [R + 5, 10]])}"/>`;
+    case 'vane':
+      // Weather vane across the rose: feathers on the "from" side, head where the wind blows to.
+      return `<line class="vane-shaft" x1="${pt(R - 8, dir)[0]}" y1="${pt(R - 8, dir)[1]}" x2="${pt(-(R - 16), dir)[0]}" y2="${pt(-(R - 16), dir)[1]}"/>`
+        + `<path class="arrow" d="${poly(dir, [[R - 2, 0], [R + 4, -9], [R - 12, -9], [R - 18, 0]])}"/>`
+        + `<path class="arrow" d="${poly(dir, [[R - 2, 0], [R + 4, 9], [R - 12, 9], [R - 18, 0]])}"/>`
+        + `<path class="arrow" d="${poly(dir, [[-(R - 4), 0], [-(R - 20), -8], [-(R - 20), 8]])}"/>`;
     case 'compass':
       // Wide arrow from the rim to the centre, pointing where the wind blows to.
       return `<path class="arrow" d="${poly(dir, [[R - 2, -4], [R - 2, 4], [32, 4], [32, 12], [8, 0], [32, -12], [32, -4]])}"/>`;
     default:
       // Triangle on the rim pointing in, with a dashed guide to the centre.
-      return `<line class="guide" x2="${pt(R - 15, dir)[0]}" y2="${pt(R - 15, dir)[1]}"/>`
+      return (guide ? `<line class="guide" x2="${pt(R - 15, dir)[0]}" y2="${pt(R - 15, dir)[1]}"/>` : '')
         + `<path class="arrow" d="${poly(dir, [[R - 15, 0], [R + 5, -13], [R + 5, 13]])}"/>`;
   }
 }
@@ -210,7 +222,7 @@ const LABELS = {
   entity: 'Wind speed', direction_entity: 'Wind direction (degrees)', gust_entity: 'Gust', rain_entity: 'Rain',
   name: 'Name', window: 'Heat-map window', direction_offset: 'Rotate rose (display only)', max_speed: 'Max speed (0 = auto)',
   smooth: 'Heat-map softness', pointer: 'Pointer style', pointer_color: 'Pointer colour (CSS)',
-  show_rim: 'Outer circle', show_rings: 'Speed rings', show_spokes: 'Spokes', show_scale: 'Scale label', rings: 'Ring count',
+  show_guide: 'Arrow guide line', show_speed: 'Current speed dot', show_gust: 'Gust ring', show_rim: 'Outer circle', show_rings: 'Speed rings', show_spokes: 'Spokes', show_scale: 'Scale label', rings: 'Ring count',
   sectors: 'Prevailing bins', max_width: 'Max size', tap_action: 'Tap action',
 };
 
@@ -260,6 +272,9 @@ class WindRoseCard extends Base {
             { name: 'pointer_color', selector: { text: {} } },
             {
               type: 'grid', name: '', schema: [
+                { name: 'show_guide', selector: { boolean: {} } },
+                { name: 'show_speed', selector: { boolean: {} } },
+                { name: 'show_gust', selector: { boolean: {} } },
                 { name: 'show_rim', selector: { boolean: {} } },
                 { name: 'show_rings', selector: { boolean: {} } },
                 { name: 'show_spokes', selector: { boolean: {} } },
@@ -400,9 +415,9 @@ class WindRoseCard extends Base {
 
     let marker = '';
     if (Number.isFinite(dir)) {
-      marker = pointerSvg(c.pointer, view(dir), R);
-      if (Number.isFinite(gust)) { const [x, y] = pt(rr(gust), view(dir)); marker += `<circle class="gust" cx="${x}" cy="${y}" r="4.5"/>`; }
-      if (Number.isFinite(speed)) { const [x, y] = pt(rr(speed), view(dir)); marker += `<circle class="now" cx="${x}" cy="${y}" r="4.5"/>`; }
+      marker = pointerSvg(c.pointer, view(dir), R, { guide: c.show_guide !== false });
+      if (c.show_gust !== false && Number.isFinite(gust)) { const [x, y] = pt(rr(gust), view(dir)); marker += `<circle class="gust" cx="${x}" cy="${y}" r="4.5"/>`; }
+      if (c.show_speed !== false && Number.isFinite(speed)) { const [x, y] = pt(rr(speed), view(dir)); marker += `<circle class="now" cx="${x}" cy="${y}" r="4.5"/>`; }
     }
 
     // Numbers live in the four corners, outside the rose, as secondary information.
@@ -445,6 +460,8 @@ class WindRoseCard extends Base {
   tspan.rain { fill: var(--info-color, #039be5); }
   tspan.err { fill: var(--error-color, #db4437); }
   .arrow, .needle-head { fill: var(--wr-pointer); stroke: var(--card-background-color, #fff); stroke-width: 1; stroke-linejoin: round; }
+  .chevron { fill: none; stroke: var(--wr-pointer); stroke-width: 3.5; stroke-linecap: round; stroke-linejoin: round; }
+  .vane-shaft { stroke: var(--wr-pointer); stroke-width: 2; }
   .needle-tail { fill: var(--secondary-text-color); opacity: .6; }
   .needle-cap { fill: var(--wr-pointer); stroke: var(--card-background-color, #fff); stroke-width: 1; }
   .guide { stroke: var(--primary-text-color); stroke-width: 1; stroke-dasharray: 2 2; opacity: .55; }

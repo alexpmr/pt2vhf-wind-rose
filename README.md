@@ -36,7 +36,7 @@ direction_entity: sensor.wind_bearing # required – direction in degrees (0 = N
 gust_entity: sensor.wind_gust        # optional
 name: Wind                           # optional
 window: 1h                           # heat-map window: 15m, 30m, 1h, 6h, 24h…
-pointer: arrow                       # arrow | needle | compass | none
+pointer: arrow                       # arrow | chevron | dart | needle | compass | vane | none
 ```
 
 | Option | Default | Description |
@@ -53,11 +53,14 @@ pointer: arrow                       # arrow | needle | compass | none
 | `max_speed` | auto | Speed at the rim. Auto picks a round value above the window's peak. |
 | `sectors` | `16` | Direction bins used for the prevailing direction: 8, 16 or 32. |
 | `rings` | `5` | Number of speed circles drawn on the grid (never changes the heat map). |
+| `show_guide` | `true` | Dashed line from the arrow to the centre (`arrow` pointer only). |
+| `show_speed` | `true` | Solid dot at the current speed, in the current direction (distance from the centre = speed). |
+| `show_gust` | `true` | Dashed ring at the current gust, same direction and scale (needs `gust_entity`). |
 | `show_rim` | `true` | Show the outer circle (the rose outline). |
 | `show_rings` | `true` | Show the inner speed circles. |
 | `show_spokes` | `true` | Show the 8 radial lines. |
 | `show_scale` | `true` | Show the rim speed label. |
-| `pointer` | `arrow` | Current-direction pointer: `arrow` (triangle on the rim + guide), `needle` (compass needle through the centre), `compass` (wide arrow from the rim to the centre) or `none`. All mark the side the wind comes from. |
+| `pointer` | `arrow` | Current-direction pointer. All mark the side the wind comes from: `arrow` (triangle on the rim + guide line), `chevron` (open V on the rim), `dart` (slim notched arrowhead on the rim), `needle` (compass needle through the centre), `compass` (wide arrow from the rim to the centre), `vane` (weather vane across the rose: feathers on the "from" side, head where the wind blows to) or `none`. |
 | `pointer_color` | text colour | Any CSS colour for the pointer, e.g. `#e8553e` or `var(--accent-color)`. |
 | `calm` | `0.5` | Speeds below this count as calm and are left out of the heat map. |
 | `max_width` | `380` | Maximum size of the rose in px on wide cards. |

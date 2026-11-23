@@ -29,7 +29,7 @@
     dr.push({ s: String((d + 360) % 360), lu: t });
   }
   const hass = (lang) => ({
-    language: lang, locale: { language: lang },
+    language: lang, locale: { language: lang }, config: { latitude: -23.5093, longitude: -46.6378 },
     states: {
       'sensor.wind_speed': { state: '4.2', attributes: { unit_of_measurement: 'km/h' } },
       'sensor.wind_direction': { state: '318', attributes: {} },
@@ -63,11 +63,18 @@
       ['needle, rotated 45°', { pointer: 'needle', direction_offset: 45, show_spokes: false }, 290],
       ['minimal: dart, no grid', { pointer: 'dart', show_rim: false, show_rings: false, show_spokes: false, show_scale: false }, 290],
     ],
+    // Background maps and runway (demo location: Campo de Marte airport, São Paulo, runway 12/30).
+    map: [
+      ['map: satellite + runway', { map: 'satellite', map_radius: 900, heat_opacity: 70, runway_heading: 99, runway_name: '12/30', pointer: 'dart', show_rings: false, show_spokes: false }, 290],
+      ['map: streets', { map: 'streets', map_radius: 900, heat_opacity: 70, show_rings: false }, 290],
+      ['map: dark + runway', { map: 'dark', map_radius: 900, heat_opacity: 75, runway_heading: 99, runway_name: '12/30', pointer: 'needle' }, 290],
+      ['runway only', { runway_heading: 99, runway_name: '12/30', show_spokes: false }, 290],
+    ],
     sizes: [[165, 'narrow column'], [300, 'half width'], [420, 'full width']]
       .map(([w, l]) => [`${l} (${w} px)`, {}, w]),
   };
   if (new URLSearchParams(location.search).get('theme') === 'light') document.body.classList.add('light');
-  if (set === 'social') Object.assign(document.body.style, { flexWrap: 'wrap', width: '604px', gap: '10px 14px' });
+  if (set === 'social' || set === 'map') Object.assign(document.body.style, { flexWrap: 'wrap', width: '604px', gap: '10px 14px' });
   for (const [label, cfg, w] of sets[set]) {
     const f = document.createElement('figure');
     f.style.width = `${w ?? 200}px`;

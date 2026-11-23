@@ -30,6 +30,10 @@ Works in light and dark themes, in English and Portuguese (card and visual edito
 
 ![Grid toggles, direction_offset and pointer_color](images/grid.png)
 
+**Background map and runway** — put your home (or airfield) under the rose: satellite, street, topographic, light or dark map, centred on the Home Assistant home location. Add a runway to see the wind against it, with the headwind (↓) and crosswind (← →) for the runway end in use.
+
+![Satellite, street and dark maps, and a runway with headwind and crosswind](images/map.png)
+
 **Any width** — everything scales with the card, from a narrow column to full width.
 
 ![The card at 165, 300 and 420 px](images/sizes.png)
@@ -81,6 +85,20 @@ show_spokes: true
 show_scale: true
 rings: 5
 sectors: 16
+# Background map
+map: none                 # none | satellite | streets | topo | light | dark | custom
+map_radius: 150           # metres from the centre to the rim
+map_opacity: 100
+heat_opacity: 100         # lower it (e.g. 70) to see the map through the heat
+map_latitude: ''          # empty = Home Assistant home location
+map_longitude: ''
+map_url: ''               # map: custom, e.g. https://…/{z}/{x}/{y}.png
+# Runway
+runway_heading: ''        # true heading of one end, e.g. 99; empty = no runway
+runway_name: ''           # painted numbers, e.g. 12/30; empty = from the heading
+runway_length: 70         # % of the rose diameter
+runway_width: 8
+runway_wind: true         # headwind / crosswind for the runway end in use
 # Size and refresh
 max_width: 380
 refresh: 60
@@ -121,6 +139,18 @@ A new card added from the card picker starts with this full list (the same optio
 | `plume_fade` | `40` | How gradually each plume tip fades, in % of the radius: higher removes hard arcs (useful with sensors that report speed in steps); 0 = sharp tip. |
 | `smooth` | `8` | Spot size for `heat_mode: spots` (% of the radius). |
 | `refresh` | `60` | Seconds between history reloads. |
+| `map` | `none` | Background map under the heat map: `satellite` (Esri World Imagery), `streets` (OpenStreetMap), `topo` (OpenTopoMap), `light` / `dark` (Esri Canvas), or `custom` with `map_url`. It rotates with `direction_offset`. |
+| `map_radius` | `150` | Metres from the centre to the rim. The zoom is picked from it. |
+| `map_opacity` | `100` | Map opacity, %. |
+| `heat_opacity` | `100` | Heat-map opacity, %; around 60–75 lets the map show through. |
+| `map_latitude`, `map_longitude` | home | Map centre. Empty = the Home Assistant home location. |
+| `map_url` | — | Tile template for `map: custom` (`{z}`, `{x}`, `{y}`; http/https only). `map_attribution` sets its credit line. |
+| `runway_heading` | — | Draws a runway through the centre along this **true** heading of one end (as seen on the map). Empty = no runway. |
+| `runway_name` | from heading | Painted numbers, e.g. `12/30` or `11L/29R` (they are magnetic, so they can differ from the true heading). The first number is the end at `runway_heading`. |
+| `runway_length`, `runway_width` | `70`, `8` | Runway size in % of the rose diameter. |
+| `runway_wind` | `true` | Shows, under the top corners, the runway end in use with its headwind (↓, ↑ = tailwind) and crosswind (← wind from the right, → from the left). |
+
+With a map, the browser downloads the map images from the provider for the map centre (your home location by default), so that provider sees the location. `map: none` (default) makes no outside requests.
 
 The card reads history through the recorder (`history/history_during_period`), so both sensors must be recorded. Direction sensors that report text (e.g. `NW`) are not supported — use a numeric degree sensor.
 
@@ -134,7 +164,7 @@ The card reads history through the recorder (`history/history_during_period`), s
 node --test test/*.test.mjs   # unit tests for the rose and density math
 ```
 
-`demo/index.html` renders the card with a simulated `hass` object; serve the folder with any static server and open it. `demo/gallery.html?set=pointers|heat|grid|sizes` renders the README images.
+`demo/index.html` renders the card with a simulated `hass` object; serve the folder with any static server and open it. `demo/gallery.html?set=pointers|heat|grid|map|sizes` renders the README images.
 
 ## License
 

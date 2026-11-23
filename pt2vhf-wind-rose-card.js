@@ -4,7 +4,7 @@
  * comes FROM, distance from the centre = speed, colour = how much time it blew there.
  * https://github.com/alexpmr/pt2vhf-wind-rose
  */
-const VERSION = '0.9.0';
+const VERSION = '0.10.0';
 const TAG = 'pt2vhf-wind-rose-card';
 
 const STR = {
@@ -230,6 +230,9 @@ function heatImage(g, n) {
   return cv.toDataURL();
 }
 
+// Percentage option → 0..1; empty or invalid = 100 %.
+const pct = (v) => (v === '' || v == null || !Number.isFinite(Number(v)) ? 1 : Math.min(1, Math.max(0, Number(v) / 100)));
+
 const pt = (r, deg) => {
   const a = (deg * Math.PI) / 180;
   return [+(r * Math.sin(a)).toFixed(2), +(-r * Math.cos(a)).toFixed(2)];
@@ -276,6 +279,106 @@ export function pointerSvg(style, dir, R, { guide = true } = {}) {
   }
 }
 
+// Background map providers (standard XYZ tiles, no API key). The attribution is drawn under the rose.
+const MAPS = {
+  satellite: { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', max: 19, attribution: 'Imagery © Esri, Maxar, Earthstar Geographics' },
+  streets: { url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', max: 19, attribution: '© OpenStreetMap contributors' },
+  topo: { url: 'https://tile.opentopomap.org/{z}/{x}/{y}.png', max: 17, attribution: '© OpenTopoMap (CC-BY-SA), © OpenStreetMap' },
+  // Esri Canvas basemaps: keyless, detail up to zoom 16 (the card caps the zoom there).
+  light: { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', max: 16, attribution: '© Esri, HERE, Garmin, © OpenStreetMap' },
+  dark: { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', max: 16, attribution: '© Esri, HERE, Garmin, © OpenStreetMap' },
+};
+export const MAP_TYPES = ['none', ...Object.keys(MAPS), 'custom'];
+
+/** Tile source for the config, or null for no map. `custom` takes an http(s) template from map_url. */
+export function mapSource(c) {
+  let s = MAPS[c.map];
+  if (c.map === 'custom') {
+    const u = String(c.map_url ?? '').trim();
+    if (!/^https?:\/\//i.test(u) || !/\{z\}/.test(u)) return null;
+    s = { url: u, max: 22, attribution: c.map_attribution || '' };
+  }
+  if (!s) return null;
+  return { max: s.max, attribution: s.attribution, url: (z, x, y) => s.url.replace('{z}', z).replace('{x}', x).replace('{y}', y) };
+}
+
+/**
+ * Web-Mercator tiles that cover the rose: centre (lat, lon) at (0, 0), radiusM metres at R units.
+ * The zoom is picked so the rose radius is ~pxRadius map pixels (sharp at that screen size).
+ * Returns { z, size (tile edge in rose units), tiles: [{ x, y, left, top }] }.
+ */
+export function mapTiles(lat, lon, radiusM, R = 80, pxRadius = 300, maxZoom = 19) {
+  const none = { z: 0, size: 0, tiles: [] };
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || !(radiusM > 0) || Math.abs(lat) > 85) return none;
+  const la = (lat * Math.PI) / 180;
+  const z = Math.min(maxZoom, Math.max(1, Math.round(Math.log2((pxRadius * 156543.03392 * Math.cos(la)) / radiusM))));
+  const n = 2 ** z;
+  const mpp = (156543.03392 * Math.cos(la)) / n; // metres per map pixel
+  const cx = ((lon + 180) / 360) * n * 256;
+  const cy = ((1 - Math.log(Math.tan(la) + 1 / Math.cos(la)) / Math.PI) / 2) * n * 256;
+  const rpx = radiusM / mpp;
+  const k = R / rpx; // rose units per map pixel
+  const tiles = [];
+  for (let ty = Math.floor((cy - rpx) / 256); ty <= Math.floor((cy + rpx) / 256); ty++) {
+    if (ty < 0 || ty >= n) continue;
+    for (let tx = Math.floor((cx - rpx) / 256); tx <= Math.floor((cx + rpx) / 256); tx++) {
+      tiles.push({ x: ((tx % n) + n) % n, y: ty, left: (tx * 256 - cx) * k, top: (ty * 256 - cy) * k });
+    }
+  }
+  return { z, size: 256 * k, tiles };
+}
+
+const rwyId = (h) => String(Math.round(withOffset(h, 0) / 10) % 36 || 36).padStart(2, '0');
+
+/**
+ * Runway with one end heading `heading` (degrees): both idents, and for the wind (from windDir at speed)
+ * the end in use (largest headwind) with its headwind and crosswind; side R/L = wind from the right/left.
+ */
+export function runwayInfo(heading, windDir, speed, name = '') {
+  if (heading === '' || heading == null || !Number.isFinite(Number(heading))) return null;
+  const h = withOffset(Number(heading), 0);
+  // Painted numbers are magnetic; runway_name (e.g. "12/30") shows them while heading stays true.
+  const nm = String(name ?? '').split('/').map((p) => p.trim());
+  const named = nm.length === 2 && nm.every((p) => p && p.length <= 4);
+  const ends = [{ id: named ? nm[0] : rwyId(h), heading: h }, { id: named ? nm[1] : rwyId(h + 180), heading: withOffset(h, 180) }];
+  if (!Number.isFinite(windDir) || !Number.isFinite(speed)) return { ends, active: null };
+  const comp = (e) => {
+    const a = ((windDir - e.heading) * Math.PI) / 180;
+    return { ...e, head: speed * Math.cos(a), cross: Math.abs(speed * Math.sin(a)), side: Math.sin(a) >= 0 ? 'R' : 'L' };
+  };
+  const [a, b] = ends.map(comp);
+  return { ends, active: a.head >= b.head ? a : b };
+}
+
+/** Runway along bearing h (rose coords): asphalt, threshold stripes, dashed centreline, idents. */
+function runwaySvg(rw, h, R, lengthPct, widthPct) {
+  const f2 = (v) => +v.toFixed(2);
+  const L = (2 * R * Math.min(100, Math.max(10, Number(lengthPct) || 70))) / 100;
+  const W = Math.max(3, (2 * R * Math.min(30, Math.max(2, Number(widthPct) || 8))) / 100);
+  const y0 = L / 2; // local frame: -y points to bearing h, so the threshold of the "h" end is at +y (approach side)
+  const fs = f2(Math.min(W * 0.7, 9));
+  const kh = W * 0.6; // threshold stripe length
+  const keys = (yStart) => {
+    let out = '';
+    const n = 4; // stripes on each side of the centreline
+    const g = W / (2 * n + 1);
+    for (let i = 0; i < 2 * n + 1; i++) {
+      if (i === n) continue; // gap on the centreline
+      out += `<rect x="${f2(-W / 2 + i * g + g * 0.2)}" y="${f2(yStart)}" width="${f2(g * 0.6)}" height="${f2(kh)}"/>`;
+    }
+    return out;
+  };
+  const idAt = (id, y, flip) => `<text class="rwy-id" x="0" y="${f2(y)}" font-size="${fs}"${flip ? ` transform="rotate(180 0 ${f2(y)})"` : ''}>${esc(id)}</text>`;
+  const idGap = kh + 1.5 + fs * 0.6;
+  return `<g class="runway" transform="rotate(${f2(h)})">`
+    + `<rect class="rwy" x="${f2(-W / 2)}" y="${f2(-y0)}" width="${f2(W)}" height="${f2(L)}"/>`
+    + `<g class="rwy-mark">${keys(y0 - 1 - kh)}${keys(-y0 + 1)}</g>`
+    + idAt(rw.ends[0].id, y0 - idGap, false)
+    + idAt(rw.ends[1].id, -y0 + idGap, true)
+    + (L > 4 * idGap ? `<line class="rwy-cl" y1="${f2(-y0 + idGap + fs)}" y2="${f2(y0 - idGap - fs)}"/>` : '')
+    + '</g>';
+}
+
 const EDITOR = {
   en: {
     labels: {
@@ -286,6 +389,9 @@ const EDITOR = {
       show_guide: 'Arrow guide line', show_speed: 'Current speed dot', show_gust: 'Gust ring', show_rim: 'Outer circle',
       show_rings: 'Speed rings', show_spokes: 'Spokes', show_scale: 'Scale label', rings: 'Ring count',
       sectors: 'Prevailing bins', calm: 'Calm below (speed)', refresh: 'History refresh', max_width: 'Max size', tap_action: 'Tap action',
+      map: 'Background map', map_radius: 'Map radius', map_opacity: 'Map opacity', heat_opacity: 'Heat-map opacity',
+      map_latitude: 'Map centre latitude', map_longitude: 'Map centre longitude', map_url: 'Custom tile URL',
+      runway_heading: 'Runway heading (true)', runway_name: 'Runway numbers', runway_length: 'Runway length', runway_width: 'Runway width', runway_wind: 'Headwind / crosswind',
     },
     helpers: {
       entity: `PT2VHF Wind Rose ${VERSION}`,
@@ -294,8 +400,17 @@ const EDITOR = {
       smooth: 'Only used when the heat-map style is "spots".',
       direction_offset: 'Turns the whole rose clockwise to match how you face the screen. Values stay true.',
       show_guide: 'Only for the "arrow" pointer.',
+      map: 'Tiles are downloaded from the provider for the map centre (your home by default).',
+      map_radius: 'Distance from the centre to the rim, in metres.',
+      map_latitude: 'Empty = Home Assistant home location.',
+      map_url: 'Only for "custom", e.g. https://…/{z}/{x}/{y}.png',
+      runway_heading: 'True heading of one end in degrees (as on the map). Empty = no runway.',
+      runway_name: 'Painted numbers, e.g. 12/30 (they are magnetic). Empty = from the heading.',
+      runway_wind: 'Headwind (↓; ↑ = tailwind) and crosswind (← →) for the runway end in use.',
     },
     appearance: 'Appearance',
+    mapSection: 'Background map',
+    runwaySection: 'Runway',
   },
   pt: {
     labels: {
@@ -306,6 +421,9 @@ const EDITOR = {
       show_guide: 'Linha guia da seta', show_speed: 'Ponto da velocidade', show_gust: 'Círculo da rajada', show_rim: 'Círculo externo',
       show_rings: 'Anéis de velocidade', show_spokes: 'Linhas dos setores', show_scale: 'Número da escala', rings: 'Quantidade de anéis',
       sectors: 'Setores da predominante', calm: 'Calmaria abaixo de', refresh: 'Atualização do histórico', max_width: 'Tamanho máximo', tap_action: 'Ação ao tocar',
+      map: 'Mapa de fundo', map_radius: 'Raio do mapa', map_opacity: 'Opacidade do mapa', heat_opacity: 'Opacidade do mapa de calor',
+      map_latitude: 'Latitude do centro', map_longitude: 'Longitude do centro', map_url: 'URL de tiles própria',
+      runway_heading: 'Rumo da pista (verdadeiro)', runway_name: 'Números da pista', runway_length: 'Comprimento da pista', runway_width: 'Largura da pista', runway_wind: 'Vento de proa / cruzado',
     },
     helpers: {
       entity: `PT2VHF Wind Rose ${VERSION}`,
@@ -314,8 +432,17 @@ const EDITOR = {
       smooth: 'Só vale quando o estilo do mapa é "spots".',
       direction_offset: 'Gira a rosa inteira no sentido horário para combinar com a sua posição. Os valores continuam reais.',
       show_guide: 'Só para o ponteiro "arrow".',
+      map: 'As imagens são baixadas do provedor para o centro do mapa (sua casa por padrão).',
+      map_radius: 'Distância do centro até a borda, em metros.',
+      map_latitude: 'Vazio = local da casa no Home Assistant.',
+      map_url: 'Só para "custom", ex.: https://…/{z}/{x}/{y}.png',
+      runway_heading: 'Rumo verdadeiro de uma cabeceira em graus (como no mapa). Vazio = sem pista.',
+      runway_name: 'Números pintados, ex.: 12/30 (são magnéticos). Vazio = calculado pelo rumo.',
+      runway_wind: 'Vento de proa (↓; ↑ = de cauda) e cruzado (← →) para a cabeceira em uso.',
     },
     appearance: 'Aparência',
+    mapSection: 'Mapa de fundo',
+    runwaySection: 'Pista',
   },
 };
 
@@ -354,6 +481,18 @@ export const DEFAULTS = {
   sectors: 16,
   max_width: 380,
   refresh: 60,
+  map: 'none',
+  map_radius: 150,
+  map_opacity: 100,
+  heat_opacity: 100,
+  map_latitude: '',
+  map_longitude: '',
+  map_url: '',
+  runway_heading: '',
+  runway_length: 70,
+  runway_width: 8,
+  runway_name: '',
+  runway_wind: true,
   tap_action: { action: 'more-info' },
 };
 
@@ -436,13 +575,41 @@ export class WindRoseCard extends Base {
             },
           ],
         },
+        {
+          type: 'expandable', name: '', title: T.mapSection, schema: [
+            { name: 'map', selector: { select: { mode: 'dropdown', options: MAP_TYPES } } },
+            {
+              type: 'grid', name: '', schema: [
+                { name: 'map_radius', selector: { number: { min: 10, max: 50000, mode: 'box', unit_of_measurement: 'm' } } },
+                { name: 'map_opacity', selector: { number: { min: 0, max: 100, step: 5, mode: 'slider', unit_of_measurement: '%' } } },
+                { name: 'heat_opacity', selector: { number: { min: 0, max: 100, step: 5, mode: 'slider', unit_of_measurement: '%' } } },
+                { name: 'map_latitude', selector: { number: { min: -85, max: 85, step: 'any', mode: 'box' } } },
+                { name: 'map_longitude', selector: { number: { min: -180, max: 180, step: 'any', mode: 'box' } } },
+              ],
+            },
+            { name: 'map_url', selector: { text: {} } },
+          ],
+        },
+        {
+          type: 'expandable', name: '', title: T.runwaySection, schema: [
+            {
+              type: 'grid', name: '', schema: [
+                { name: 'runway_heading', selector: { number: { min: 0, max: 360, step: 1, mode: 'box', unit_of_measurement: '°' } } },
+                { name: 'runway_name', selector: { text: {} } },
+                { name: 'runway_wind', selector: { boolean: {} } },
+                { name: 'runway_length', selector: { number: { min: 10, max: 100, step: 5, mode: 'slider', unit_of_measurement: '%' } } },
+                { name: 'runway_width', selector: { number: { min: 2, max: 30, step: 1, mode: 'slider', unit_of_measurement: '%' } } },
+              ],
+            },
+          ],
+        },
         { name: 'tap_action', selector: { ui_action: {} } },
       ],
       computeLabel: (s) => T.labels[s.name],
       computeHelper: (s) => T.helpers[s.name],
     };
     // Show the real defaults (e.g. toggles that are on) even when a key is missing from the YAML.
-    const fill = (schema) => schema.forEach((s) => (s.schema ? fill(s.schema) : (s.name in DEFAULTS && (s.default = DEFAULTS[s.name]))));
+    const fill = (schema) => schema.forEach((s) => (s.schema ? fill(s.schema) : (s.name in DEFAULTS && DEFAULTS[s.name] !== '' && (s.default = DEFAULTS[s.name]))));
     fill(form.schema);
     return form;
   }
@@ -565,6 +732,28 @@ export class WindRoseCard extends Base {
       ? `<image href="${this._heat}" x="${-R}" y="${-R}" width="${2 * R}" height="${2 * R}" preserveAspectRatio="none"${
         heatRot ? ` transform="rotate(${heatRot})"` : ''}/>` : '';
 
+    // Background map (satellite, streets…) centred on the home location, rotated with the rose.
+    let map = '';
+    let credit = '';
+    const src = mapSource(c);
+    if (src) {
+      const num = (v) => (v === '' || v == null ? NaN : Number(v));
+      const lat = Number.isFinite(num(c.map_latitude)) ? num(c.map_latitude) : hass.config?.latitude;
+      const lon = Number.isFinite(num(c.map_longitude)) ? num(c.map_longitude) : hass.config?.longitude;
+      const px = Math.max(128, (Number(c.max_width) || 380) * 0.4 * (globalThis.devicePixelRatio || 1));
+      const m = mapTiles(lat, lon, Number(c.map_radius) || 150, R, px, src.max);
+      // +0.2 overlap hides hairline seams between tiles.
+      const tiles = m.tiles.map((t) => `<image href="${esc(src.url(m.z, t.x, t.y))}" x="${+t.left.toFixed(3)}" y="${+t.top.toFixed(3)}" width="${+(m.size + 0.2).toFixed(3)}" height="${+(m.size + 0.2).toFixed(3)}" preserveAspectRatio="none"/>`).join('');
+      const op = pct(c.map_opacity);
+      if (tiles) map = `<g${off ? ` transform="rotate(${off})"` : ''} opacity="${op}">${tiles}</g>`;
+      if (tiles && src.attribution) credit = `<text class="credit" x="0" y="98">${esc(src.attribution)}</text>`;
+    }
+    const heatOp = pct(c.heat_opacity);
+
+    // Runway centred on the rose, along its heading (rotates with direction_offset).
+    const rw = runwayInfo(c.runway_heading, dir, speed, c.runway_name);
+    const runway = rw ? runwaySvg(rw, view(rw.ends[0].heading), R, c.runway_length, c.runway_width) : '';
+
     // Grid is decoration only: ring count/visibility never touches the heat map.
     let grid = c.show_rim === false ? '' : `<circle r="${R}"/>`;
     if (c.show_rings !== false) for (let r = 1; r < c.rings; r++) grid += `<circle r="${(R * r) / c.rings}"/>`;
@@ -603,6 +792,13 @@ export class WindRoseCard extends Base {
       + (Number.isFinite(gust) ? corner(-98, 78, 'start', L.gust, `${nf.format(gust)}${u(` ${gu.attributes?.unit_of_measurement || unit}`)}`) : '')
       + (hist ? corner(98, 78, 'end', windowLabel(lang, windowMinutes(c)), hist) : '');
 
+    let rwyWind = '';
+    if (rw?.active && c.runway_wind !== false) {
+      const a = rw.active;
+      rwyWind = `<text class="rwy-wind" x="-98" y="-66" text-anchor="start"><tspan class="unit">${a.id} </tspan>${a.head >= 0 ? '↓' : '↑'} ${nf.format(Math.abs(a.head))}${u(` ${unit}`)}</text>`
+        + `<text class="rwy-wind" x="98" y="-66" text-anchor="end">${a.side === 'R' ? '←' : '→'} ${nf.format(a.cross)}${u(` ${unit}`)}</text>`;
+    }
+
     if (!this._root) {
       this._root = this.attachShadow({ mode: 'open' });
       // Listeners live on the shadow root so they survive innerHTML re-renders.
@@ -619,6 +815,12 @@ export class WindRoseCard extends Base {
   .grid circle, .grid line { fill: none; stroke: var(--divider-color, #8884); stroke-width: .6; }
   text { fill: var(--secondary-text-color); dominant-baseline: central; font-family: inherit; }
   text.card { font-size: 9px; text-anchor: middle; }
+  .rwy { fill: #1d1d1d; fill-opacity: .9; stroke: #fff; stroke-opacity: .7; stroke-width: .5; }
+  .rwy-mark rect { fill: #fff; }
+  .rwy-cl { stroke: #fff; stroke-width: .7; stroke-dasharray: 3 2.5; }
+  text.rwy-id { fill: #fff; text-anchor: middle; font-weight: 700; }
+  text.rwy-wind { font-size: 9px; fill: var(--primary-text-color); opacity: .85; }
+  text.credit { font-size: 4px; text-anchor: middle; opacity: .6; }
   text.scale { font-size: 6.5px; text-anchor: middle; opacity: .8; }
   text.lbl { font-size: 7.5px; opacity: .8; }
   text.val { font-size: 11px; fill: var(--primary-text-color); opacity: .85; }
@@ -642,9 +844,10 @@ export class WindRoseCard extends Base {
     <defs>
       <clipPath id="disc"><circle r="${R}"/></clipPath>
     </defs>
-    <g clip-path="url(#disc)">${heat}</g>
+    <g clip-path="url(#disc)">${map}<g opacity="${heatOp}">${heat}</g></g>
+    ${runway}
     <g class="grid">${grid}</g>
-    ${labels}${scale}${marker}${corners}
+    ${labels}${scale}${marker}${corners}${rwyWind}${credit}
   </svg>
 </ha-card>`;
   }

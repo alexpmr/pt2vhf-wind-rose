@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  computeRose, toSeries, sectorOf, niceMax, isRaining, density, withOffset, windowMinutes, windowLabel, pointerSvg, plume, WindRoseCard, DEFAULTS, editorText,
+  computeRose, toSeries, sectorOf, niceMax, isRaining, density, withOffset, windowMinutes, windowLabel, pointerSvg, plume, WindRoseCard, DEFAULTS, editorText, mapTiles, mapSource, runwayInfo,
 } from '../pt2vhf-wind-rose-card.js';
 
 // Value of an n×n grid at polar (rho in unit radius, bearing in degrees; 0 = N, clockwise).
@@ -266,4 +266,79 @@ test('no data before first sample and unavailable values are skipped', () => {
   const none = computeRose([], [], { start, end });
   assert.equal(none.total, 0);
   assert.equal(none.prevailing, -1);
+});
+
+test('mapTiles: the centre point falls inside the tiles and the radius maps to R', () => {
+  const R = 80;
+  const lat = -23.55, lon = -46.63;
+  const m = mapTiles(lat, lon, 150, R, 300);
+  assert.ok(m.z >= 17 && m.z <= 19, `zoom ${m.z}`);
+  // Tiles cover the whole rose square [-R, R]², and nothing far outside it.
+  const minL = Math.min(...m.tiles.map((t) => t.left));
+  const minT = Math.min(...m.tiles.map((t) => t.top));
+  const maxR = Math.max(...m.tiles.map((t) => t.left + m.size));
+  const maxB = Math.max(...m.tiles.map((t) => t.top + m.size));
+  assert.ok(minL <= -R && minT <= -R && maxR >= R && maxB >= R, 'covers the rose');
+  assert.ok(minL > -R - m.size && maxR < R + m.size, 'no extra columns');
+  // Exactly one tile contains the centre (0, 0), and it is the tile of that lat/lon.
+  const n = 2 ** m.z;
+  const tx = Math.floor(((lon + 180) / 360) * n);
+  const la = (lat * Math.PI) / 180;
+  const ty = Math.floor(((1 - Math.log(Math.tan(la) + 1 / Math.cos(la)) / Math.PI) / 2) * n);
+  const hit = m.tiles.filter((t) => t.left <= 0 && t.left + m.size > 0 && t.top <= 0 && t.top + m.size > 0);
+  assert.equal(hit.length, 1);
+  assert.deepEqual([hit[0].x, hit[0].y], [tx, ty]);
+  // Scale: one tile is 256 px of the map; R units = 150 m.
+  const mpp = (156543.03392 * Math.cos(la)) / n;
+  assert.ok(Math.abs(m.size - (256 * mpp * R) / 150) < 1e-6);
+});
+
+test('mapTiles: zoom follows the radius and respects the provider max zoom', () => {
+  const near = mapTiles(40, -8, 100, 80, 300);
+  const far = mapTiles(40, -8, 5000, 80, 300);
+  assert.ok(far.z < near.z);
+  assert.ok(mapTiles(40, -8, 5, 80, 300, 17).z <= 17);
+  assert.equal(mapTiles(NaN, 0, 100).tiles.length, 0);
+  assert.equal(mapTiles(40, -8, 0).tiles.length, 0);
+});
+
+test('mapSource: built-in providers, custom https template only, none = no map', () => {
+  assert.equal(mapSource({ map: 'none' }), null);
+  assert.equal(mapSource({}), null);
+  const sat = mapSource({ map: 'satellite' });
+  assert.match(sat.url(18, 5, 7), /^https:\/\/.+\/18\/7\/5$/); // Esri is z/y/x
+  assert.ok(sat.attribution);
+  assert.match(mapSource({ map: 'streets' }).url(3, 1, 2), /openstreetmap\.org\/3\/1\/2\.png$/);
+  for (const k of ['topo', 'light', 'dark']) assert.ok(mapSource({ map: k }), k);
+  const cu = mapSource({ map: 'custom', map_url: 'https://t.example/{z}/{x}/{y}.png' });
+  assert.equal(cu.url(4, 2, 3), 'https://t.example/4/2/3.png');
+  assert.equal(mapSource({ map: 'custom', map_url: 'javascript:alert(1)//{z}{x}{y}' }), null);
+  assert.equal(mapSource({ map: 'custom', map_url: '' }), null);
+});
+
+test('runwayInfo: idents, active end, headwind and crosswind components', () => {
+  const close = (a, b) => assert.ok(Math.abs(a - b) < 0.01, `${a} ≠ ${b}`);
+  let r = runwayInfo(90, 100, 10);
+  assert.deepEqual(r.ends.map((e) => e.id), ['09', '27']);
+  assert.equal(r.active.id, '09');
+  close(r.active.head, 10 * Math.cos(Math.PI / 18));
+  close(r.active.cross, 10 * Math.sin(Math.PI / 18));
+  assert.equal(r.active.side, 'R'); // wind from 100° on runway 09 comes from the right
+  r = runwayInfo(90, 250, 10);
+  assert.equal(r.active.id, '27');
+  assert.equal(r.active.side, 'L');
+  assert.ok(r.active.head > 0);
+  assert.deepEqual(runwayInfo(360, 0, 5).ends.map((e) => e.id), ['36', '18']);
+  assert.deepEqual(runwayInfo(5, 0, 5).ends.map((e) => e.id), ['01', '19']);
+  assert.equal(runwayInfo(90, NaN, 5).active, null); // no wind → no components
+  assert.equal(runwayInfo('', 0, 5), null); // no runway configured
+});
+
+test('runwayInfo: runway_name overrides the idents (magnetic numbers), components still use the true heading', () => {
+  const r = runwayInfo(100, 100, 10, '12/30');
+  assert.deepEqual(r.ends.map((e) => e.id), ['12', '30']);
+  assert.equal(r.active.id, '12');
+  assert.ok(Math.abs(r.active.head - 10) < 1e-9);
+  assert.deepEqual(runwayInfo(110, 0, 1, ' 11L / 29R ').ends.map((e) => e.id), ['11L', '29R']);
+  assert.deepEqual(runwayInfo(110, 0, 1, 'junk').ends.map((e) => e.id), ['11', '29']); // not "A/B" → derived
 });

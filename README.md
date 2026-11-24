@@ -34,6 +34,14 @@ Works in light and dark themes, in English and Portuguese (card and visual edito
 
 ![Satellite, street and dark maps, and a runway with headwind and crosswind](images/map.png)
 
+**Aerodrome by ICAO code** — `icao: SBGR` finds the runways (OurAirports data); pick the ones you want with `runways`. Over a map they are drawn at their real place and size.
+
+![SBGR with all runways and with only 10L/28R](images/icao.png)
+
+**Map position in the visual editor** — see the map, drag it, zoom it (wheel, pinch, + −), nudge it by metres or use your device's location. Everything is saved in the card.
+
+![Map position panel with drag, arrows and zoom next to the card](images/editor.png)
+
 **Any width** — everything scales with the card, from a narrow column to full width.
 
 ![The card at 165, 300 and 420 px](images/sizes.png)
@@ -90,10 +98,15 @@ map: none                 # none | satellite | streets | topo | light | dark | c
 map_radius: 150           # metres from the centre to the rim
 map_opacity: 100
 heat_opacity: 100         # lower it (e.g. 70) to see the map through the heat
-map_latitude: ''          # empty = Home Assistant home location
+map_center: home          # home | device | an entity with coordinates, e.g. person.me
+map_shift_north: 0        # fine adjustment in metres (negative = south)
+map_shift_east: 0         # (negative = west)
+map_latitude: ''          # fixed centre; empty = use map_center
 map_longitude: ''
 map_url: ''               # map: custom, e.g. https://…/{z}/{x}/{y}.png
 # Runway
+icao: ''                  # aerodrome code, e.g. SBMT
+runways: []               # e.g. [12/30]; empty = all open runways
 runway_heading: ''        # true heading of one end, e.g. 99; empty = no runway
 runway_name: ''           # painted numbers, e.g. 12/30; empty = from the heading
 runway_length: 70         # % of the rose diameter
@@ -139,18 +152,22 @@ A new card added from the card picker starts with this full list (the same optio
 | `plume_fade` | `40` | How gradually each plume tip fades, in % of the radius: higher removes hard arcs (useful with sensors that report speed in steps); 0 = sharp tip. |
 | `smooth` | `8` | Spot size for `heat_mode: spots` (% of the radius). |
 | `refresh` | `60` | Seconds between history reloads. |
-| `map` | `none` | Background map under the heat map: `satellite` (Esri World Imagery), `streets` (OpenStreetMap), `topo` (OpenTopoMap), `light` / `dark` (Esri Canvas), or `custom` with `map_url`. It rotates with `direction_offset`. |
+| `map` | `none` | Background map under the heat map: `satellite` (Esri World Imagery), `streets` (Esri), `topo` (OpenTopoMap), `light` / `dark` (Esri Canvas), or `custom` with `map_url`. It rotates with `direction_offset`. |
 | `map_radius` | `150` | Metres from the centre to the rim. The zoom is picked from it. |
 | `map_opacity` | `100` | Map opacity, %. |
 | `heat_opacity` | `100` | Heat-map opacity, %; around 60–75 lets the map show through. |
-| `map_latitude`, `map_longitude` | home | Map centre. Empty = the Home Assistant home location. |
+| `map_center` | `home` | `home` (with `icao` set: the aerodrome), `device` (location of the device showing the card; asks permission once, needs HTTPS) or an entity with coordinates (`person.me`, `zone.home`…). |
+| `map_shift_north`, `map_shift_east` | `0` | Moves the centre by metres; negative = south / west. The editor's map preview sets them by dragging. |
+| `map_latitude`, `map_longitude` | — | Fixed map centre; wins over `map_center` and `icao`. |
 | `map_url` | — | Tile template for `map: custom` (`{z}`, `{x}`, `{y}`; http/https only). `map_attribution` sets its credit line. |
+| `icao` | — | Aerodrome code. Runways come from OurAirports (about 4 MB, downloaded once and then cached for 30 days). With a map, runways whose coordinates are known are drawn at their real place and size; otherwise through the centre. |
+| `runways` | all open | Runways to draw, by name, e.g. `[10L/28R]`. |
 | `runway_heading` | — | Draws a runway through the centre along this **true** heading of one end (as seen on the map). Empty = no runway. |
 | `runway_name` | from heading | Painted numbers, e.g. `12/30` or `11L/29R` (they are magnetic, so they can differ from the true heading). The first number is the end at `runway_heading`. |
 | `runway_length`, `runway_width` | `70`, `8` | Runway size in % of the rose diameter. |
-| `runway_wind` | `true` | Shows, under the top corners, the runway end in use with its headwind (↓, ↑ = tailwind) and crosswind (← wind from the right, → from the left). |
+| `runway_wind` | `true` | Shows, under the top corners, the runway end with most headwind (among all drawn) with its headwind (↓, ↑ = tailwind) and crosswind (← wind from the right, → from the left). |
 
-With a map, the browser downloads the map images from the provider for the map centre (your home location by default), so that provider sees the location. `map: none` (default) makes no outside requests.
+With a map, the browser downloads the map images from the provider for the map centre (your home location by default), so that provider sees the location. `icao` downloads the runway list from OurAirports (GitHub Pages). With `map: none` (default) and no `icao`, the card makes no outside requests and never asks for your location. The map services belong to third parties: check their terms for your use, or use your own with `map: custom`. Wind components are informational, not for flight operations.
 
 The card reads history through the recorder (`history/history_during_period`), so both sensors must be recorded. Direction sensors that report text (e.g. `NW`) are not supported — use a numeric degree sensor.
 
@@ -164,7 +181,7 @@ The card reads history through the recorder (`history/history_during_period`), s
 node --test test/*.test.mjs   # unit tests for the rose and density math
 ```
 
-`demo/index.html` renders the card with a simulated `hass` object; serve the folder with any static server and open it. `demo/gallery.html?set=pointers|heat|grid|map|sizes` renders the README images.
+`demo/index.html` renders the card with a simulated `hass` object; serve the folder with any static server and open it. `demo/editor.html` shows the map-position editor and `demo/gallery.html?set=pointers|heat|grid|map|icao|sizes` renders the README images.
 
 ## License
 

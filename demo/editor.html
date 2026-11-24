@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="referrer" content="same-origin">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Wind Rose editor demo</title>
+<style>
+  /* The visual editor's "Map position" panel next to a live card. ha-form only exists inside HA, so the
+     regular fields are not shown here; the map preview, drag, zoom and buttons are. */
+  body { margin: 0; padding: 14px; background: #111; color: #e1e1e1; display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start;
+    --primary-text-color: #e1e1e1; --secondary-text-color: #9b9b9b; --divider-color: #ffffff1f; --card-background-color: #1c1c1c;
+    --primary-color: #03a9f4; font-family: Roboto, system-ui, sans-serif; }
+  .ed { width: 340px; }
+  .card { width: 300px; }
+  pre { width: 100%; font: 12px ui-monospace, Consolas, monospace; color: #9b9b9b; margin: 0; }
+</style>
+</head>
+<body>
+<div class="ed"><pt2vhf-wind-rose-card-editor></pt2vhf-wind-rose-card-editor></div>
+<div class="card"><pt2vhf-wind-rose-card></pt2vhf-wind-rose-card></div>
+<pre id="out"></pre>
+<script type="module">
+  import '../pt2vhf-wind-rose-card.js';
+  const q = new URLSearchParams(location.search);
+  const now = Date.now() / 1000;
+  const sp = [], dr = [];
+  let seed = 11; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (let t = now - 3600; t < now; t += 20) {
+    const r = rnd();
+    sp.push({ s: String(2 + rnd() * 12), lu: t });
+    dr.push({ s: String((r < 0.7 ? 300 + (rnd() - 0.5) * 40 : 120 + (rnd() - 0.5) * 30 + 360) % 360), lu: t });
+  }
+  const hass = {
+    language: 'en', locale: { language: q.get('lang') || 'en' }, config: { latitude: -23.5093, longitude: -46.6378 },
+    states: {
+      'sensor.wind_speed': { state: '9.2', attributes: { unit_of_measurement: 'km/h' } },
+      'sensor.wind_direction': { state: '296', attributes: {} },
+    },
+    callWS: async () => ({ 'sensor.wind_speed': sp, 'sensor.wind_direction': dr }),
+  };
+  let config = {
+    type: 'custom:pt2vhf-wind-rose-card', entity: 'sensor.wind_speed', direction_entity: 'sensor.wind_direction',
+    map: 'satellite', map_radius: 1200, heat_opacity: 70, icao: q.get('icao') ?? 'SBMT', show_rings: false, show_spokes: false,
+  };
+  const ed = document.querySelector('pt2vhf-wind-rose-card-editor');
+  const card = document.querySelector('pt2vhf-wind-rose-card');
+  const out = document.getElementById('out');
+  const show = () => { card.setConfig(config); card.hass = hass; out.textContent = JSON.stringify(Object.fromEntries(Object.entries(config).filter(([k]) => /map|runway|icao/.test(k))), null, 1); };
+  ed.addEventListener('config-changed', (e) => { config = e.detail.config; show(); });
+  ed.hass = hass;
+  ed.setConfig(config);
+  show();
+</script>
+</body>
+</html>

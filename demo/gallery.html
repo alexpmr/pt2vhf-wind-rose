@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="referrer" content="same-origin">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Wind Rose gallery</title>
 <style>
@@ -70,11 +71,16 @@
       ['map: dark + runway', { map: 'dark', map_radius: 900, heat_opacity: 75, runway_heading: 99, runway_name: '12/30', pointer: 'needle' }, 290],
       ['runway only', { runway_heading: 99, runway_name: '12/30', show_spokes: false }, 290],
     ],
+    // Aerodrome runways by ICAO code (OurAirports data), drawn at their real place and size.
+    icao: [
+      ['icao: SBGR (all runways)', { map: 'satellite', icao: 'SBGR', map_radius: 2200, heat_opacity: 70, show_rings: false, show_spokes: false, pointer: 'dart' }, 290],
+      ['icao: SBGR, runways: [10L/28R]', { map: 'satellite', icao: 'SBGR', runways: ['10L/28R'], map_radius: 2200, heat_opacity: 70, show_rings: false, show_spokes: false, pointer: 'dart' }, 290],
+    ],
     sizes: [[165, 'narrow column'], [300, 'half width'], [420, 'full width']]
       .map(([w, l]) => [`${l} (${w} px)`, {}, w]),
   };
   if (new URLSearchParams(location.search).get('theme') === 'light') document.body.classList.add('light');
-  if (set === 'social' || set === 'map') Object.assign(document.body.style, { flexWrap: 'wrap', width: '604px', gap: '10px 14px' });
+  if (['social', 'map', 'icao'].includes(set)) Object.assign(document.body.style, { flexWrap: 'wrap', width: '604px', gap: '10px 14px' });
   for (const [label, cfg, w] of sets[set]) {
     const f = document.createElement('figure');
     f.style.width = `${w ?? 200}px`;

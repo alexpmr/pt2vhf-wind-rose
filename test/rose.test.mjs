@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  computeRose, toSeries, sectorOf, niceMax, isRaining, density, withOffset, windowMinutes, windowLabel, pointerSvg, plume, WindRoseCard, DEFAULTS, editorText, mapTiles, mapSource, runwayInfo,
+  computeRose, toSeries, sectorOf, niceMax, isRaining, density, withOffset, windowMinutes, windowLabel, pointerSvg, plume, WindRoseCard, DEFAULTS, editorText, mapTiles, mapSource, runwayInfo, shiftLatLon, mapCenter, parseRunways, runwayPlacement, selectRunways, bestRunwayEnd,
 } from '../pt2vhf-wind-rose-card.js';
 
 // Value of an n×n grid at polar (rho in unit radius, bearing in degrees; 0 = N, clockwise).
@@ -308,7 +308,7 @@ test('mapSource: built-in providers, custom https template only, none = no map',
   const sat = mapSource({ map: 'satellite' });
   assert.match(sat.url(18, 5, 7), /^https:\/\/.+\/18\/7\/5$/); // Esri is z/y/x
   assert.ok(sat.attribution);
-  assert.match(mapSource({ map: 'streets' }).url(3, 1, 2), /openstreetmap\.org\/3\/1\/2\.png$/);
+  for (const k of ['satellite', 'streets', 'topo', 'light', 'dark']) assert.doesNotMatch(mapSource({ map: k }).url(3, 1, 2), /tile\.openstreetmap\.org/, 'needs a Referer, which HA does not send');
   for (const k of ['topo', 'light', 'dark']) assert.ok(mapSource({ map: k }), k);
   const cu = mapSource({ map: 'custom', map_url: 'https://t.example/{z}/{x}/{y}.png' });
   assert.equal(cu.url(4, 2, 3), 'https://t.example/4/2/3.png');
@@ -341,4 +341,85 @@ test('runwayInfo: runway_name overrides the idents (magnetic numbers), component
   assert.ok(Math.abs(r.active.head - 10) < 1e-9);
   assert.deepEqual(runwayInfo(110, 0, 1, ' 11L / 29R ').ends.map((e) => e.id), ['11L', '29R']);
   assert.deepEqual(runwayInfo(110, 0, 1, 'junk').ends.map((e) => e.id), ['11', '29']); // not "A/B" → derived
+});
+
+const close = (a, b, tol = 1e-6, msg = '') => assert.ok(Math.abs(a - b) <= tol, `${msg} ${a} ≠ ${b}`);
+
+test('shiftLatLon: metres north/east → degrees', () => {
+  const [la, lo] = shiftLatLon(-23.5, -46.6, 111.32, 0);
+  close(la, -23.499, 1e-9); close(lo, -46.6, 1e-12);
+  const [la2, lo2] = shiftLatLon(60, 10, 0, 1000);
+  close(la2, 60, 1e-12); close(lo2, 10 + 1000 / (111320 * 0.5), 1e-9);
+  const [la3, lo3] = shiftLatLon(10, 20, -50, -50);
+  assert.ok(la3 < 10 && lo3 < 20);
+});
+
+test('mapCenter: manual > device/entity > aerodrome > home, then the shift', () => {
+  const hass = { config: { latitude: 1, longitude: 2 }, states: { 'person.a': { attributes: { latitude: 5, longitude: 6 } } } };
+  const base = { map_latitude: '', map_longitude: '', map_center: 'home', map_shift_north: 0, map_shift_east: 0 };
+  assert.deepEqual(mapCenter(base, hass), { lat: 1, lon: 2, source: 'home' });
+  assert.equal(mapCenter({ ...base, map_center: 'person.a' }, hass).source, 'entity');
+  assert.equal(mapCenter({ ...base, map_center: 'person.a' }, hass).lat, 5);
+  assert.equal(mapCenter({ ...base, map_center: 'person.none' }, hass).source, 'home'); // unknown entity → home
+  assert.equal(mapCenter({ ...base, map_center: 'device' }, hass, { device: [7, 8] }).lat, 7);
+  assert.equal(mapCenter({ ...base, map_center: 'device' }, hass, {}).source, 'home'); // no permission yet → home
+  assert.equal(mapCenter(base, hass, { aerodrome: [3, 4] }).source, 'aerodrome');
+  assert.equal(mapCenter({ ...base, map_center: 'device' }, hass, { device: [7, 8], aerodrome: [3, 4] }).source, 'device');
+  const m = mapCenter({ ...base, map_latitude: 9, map_longitude: 9 }, hass, { device: [7, 8], aerodrome: [3, 4] });
+  assert.deepEqual([m.lat, m.lon, m.source], [9, 9, 'manual']);
+  const s = mapCenter({ ...base, map_shift_north: 111.32 }, hass);
+  close(s.lat, 1.001, 1e-9);
+  assert.equal(mapCenter(base, { states: {} }).source, 'none');
+});
+
+const CSV = `"id","airport_ref","airport_ident","length_ft","width_ft","surface","lighted","closed","le_ident","le_latitude_deg","le_longitude_deg","le_elevation_ft","le_heading_degT","le_displaced_threshold_ft","he_ident","he_latitude_deg","he_longitude_deg","he_elevation_ft","he_heading_degT","he_displaced_threshold_ft"
+234040,5945,"SBMT",5249,147,"ASP",1,0,"12",-23.50830078125,-46.64250183105469,2379,100,984,"30",-23.51020050048828,-46.63140106201172,2376,280,492
+1,2,"SBGR",12140,148,"ASP",1,0,"10L",-23.4207,-46.4930,2459,97.5,,"28R",-23.4320,-46.4593,2461,277.5,
+2,2,"SBGR",9843,148,"ASP",1,0,"10R",-23.4278,-46.4893,,,,"28L",-23.4370,-46.4620,,,
+3,2,"SBGR",1000,50,"GRS",0,1,"18",,,,,,"36",,,,,
+4,9,"XSBMT",1,1,"ASP",0,0,"01",,,,,,"19",,,,,`;
+
+test('parseRunways: only that aerodrome, idents, heading from data, coords or ident', () => {
+  const mt = parseRunways(CSV, 'sbmt');
+  assert.equal(mt.length, 1);
+  assert.equal(mt[0].name, '12/30');
+  assert.equal(mt[0].le.heading, 100);
+  close(mt[0].lengthM, 5249 * 0.3048, 1e-6);
+  close(mt[0].le.lat, -23.50830078125);
+  const gr = parseRunways(CSV, 'SBGR');
+  assert.deepEqual(gr.map((r) => r.name), ['10L/28R', '10R/28L', '18/36']);
+  assert.ok(gr[1].le.heading > 100 && gr[1].le.heading < 125, `bearing from coords ${gr[1].le.heading}`);
+  assert.equal(gr[2].le.heading, 180); // no data, no coords → from the ident
+  assert.equal(gr[2].closed, true);
+  assert.equal(parseRunways(CSV, 'ZZZZ').length, 0);
+  assert.equal(parseRunways(CSV, '').length, 0);
+});
+
+test('selectRunways: empty = all open runways, a list or comma text picks by name', () => {
+  const gr = parseRunways(CSV, 'SBGR');
+  assert.deepEqual(selectRunways(gr, []).map((r) => r.name), ['10L/28R', '10R/28L']);
+  assert.deepEqual(selectRunways(gr, ['10R/28L']).map((r) => r.name), ['10R/28L']);
+  assert.deepEqual(selectRunways(gr, '18/36, 10L/28R').map((r) => r.name), ['10L/28R', '18/36']);
+});
+
+test('runwayPlacement: real position and size in rose units, north up', () => {
+  const [rw] = parseRunways(CSV, 'SBMT');
+  const mid = [(rw.le.lat + rw.he.lat) / 2, (rw.le.lon + rw.he.lon) / 2];
+  const p = runwayPlacement(rw, { lat: mid[0], lon: mid[1] }, 1000, 80);
+  close(p.x, 0, 1e-6); close(p.y, 0, 1e-6);
+  close(p.L, (rw.lengthM * 80) / 1000, 0.6, 'length');
+  close(p.W, (rw.widthM * 80) / 1000, 1e-6, 'width');
+  close(p.h, 100, 1e-9);
+  // 500 m east of the runway centre, the runway sits 40 units to the left (west).
+  const q = runwayPlacement(rw, { lat: mid[0], lon: mid[1] + 500 / (111320 * Math.cos((mid[0] * Math.PI) / 180)) }, 1000, 80);
+  close(q.x, -40, 1e-6); close(q.y, 0, 1e-6);
+  assert.equal(runwayPlacement(parseRunways(CSV, 'SBGR')[2], { lat: 0, lon: 0 }, 1000, 80), null); // no coords
+});
+
+test('bestRunwayEnd: the end with most headwind among the drawn runways', () => {
+  const gr = parseRunways(CSV, 'SBGR');
+  const b = bestRunwayEnd(gr, 280, 10);
+  assert.ok(['28R', '28L'].includes(b.id));
+  assert.equal(bestRunwayEnd(gr, 180, 10).id, '18');
+  assert.equal(bestRunwayEnd([], 180, 10), null);
 });

@@ -4,7 +4,7 @@
  * comes FROM, distance from the centre = speed, colour = how much time it blew there.
  * https://github.com/alexpmr/pt2vhf-wind-rose
  */
-const VERSION = '0.10.0';
+const VERSION = '0.11.0';
 const TAG = 'pt2vhf-wind-rose-card';
 
 const STR = {
@@ -282,7 +282,8 @@ export function pointerSvg(style, dir, R, { guide = true } = {}) {
 // Background map providers (standard XYZ tiles, no API key). The attribution is drawn under the rose.
 const MAPS = {
   satellite: { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', max: 19, attribution: 'Imagery © Esri, Maxar, Earthstar Geographics' },
-  streets: { url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', max: 19, attribution: '© OpenStreetMap contributors' },
+  // Not tile.openstreetmap.org: it rejects requests without a Referer, and HA pages use referrer=same-origin.
+  streets: { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', max: 19, attribution: '© Esri, HERE, Garmin, © OpenStreetMap' },
   topo: { url: 'https://tile.opentopomap.org/{z}/{x}/{y}.png', max: 17, attribution: '© OpenTopoMap (CC-BY-SA), © OpenStreetMap' },
   // Esri Canvas basemaps: keyless, detail up to zoom 16 (the card caps the zoom there).
   light: { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', max: 16, attribution: '© Esri, HERE, Garmin, © OpenStreetMap' },
@@ -350,11 +351,175 @@ export function runwayInfo(heading, windDir, speed, name = '') {
   return { ends, active: a.head >= b.head ? a : b };
 }
 
-/** Runway along bearing h (rose coords): asphalt, threshold stripes, dashed centreline, idents. */
-function runwaySvg(rw, h, R, lengthPct, widthPct) {
+const M_PER_DEG = 111320; // metres per degree of latitude (spherical approximation, fine at map scale)
+const cosd = (d) => Math.cos((d * Math.PI) / 180);
+
+/** Moves a point `north` / `east` metres (negative = south / west). */
+export function shiftLatLon(lat, lon, north = 0, east = 0) {
+  return [lat + (Number(north) || 0) / M_PER_DEG, lon + (Number(east) || 0) / (M_PER_DEG * cosd(lat))];
+}
+
+/**
+ * Map centre. Priority: map_latitude/longitude > map_center (device / an entity with latitude and
+ * longitude) > the aerodrome of `icao` > Home Assistant home. map_shift_north/east (metres) apply last.
+ * extra = { device: [lat, lon], aerodrome: [lat, lon] } when known.
+ */
+export function mapCenter(c, hass, extra = {}) {
+  const num = (v) => (v === '' || v == null ? NaN : Number(v));
+  let p = null;
+  let source = 'none';
+  const ll = (lat, lon) => (Number.isFinite(lat) && Number.isFinite(lon) ? [lat, lon] : null);
+  if ((p = ll(num(c.map_latitude), num(c.map_longitude)))) source = 'manual';
+  else if (c.map_center === 'device' && (p = extra.device && ll(...extra.device))) source = 'device';
+  else if (String(c.map_center || '').includes('.')
+    && (p = ll(num(hass?.states?.[c.map_center]?.attributes?.latitude), num(hass?.states?.[c.map_center]?.attributes?.longitude)))) source = 'entity';
+  else if ((p = extra.aerodrome && ll(...extra.aerodrome))) source = 'aerodrome';
+  else if ((p = ll(num(hass?.config?.latitude), num(hass?.config?.longitude)))) source = 'home';
+  if (!p) return { lat: NaN, lon: NaN, source };
+  const [lat, lon] = shiftLatLon(p[0], p[1], c.map_shift_north, c.map_shift_east);
+  return { lat, lon, source };
+}
+
+/** Initial great-circle bearing from point 1 to point 2, degrees. */
+function bearing(lat1, lon1, lat2, lon2) {
+  const r = Math.PI / 180;
+  const y = Math.sin((lon2 - lon1) * r) * Math.cos(lat2 * r);
+  const x = Math.cos(lat1 * r) * Math.sin(lat2 * r) - Math.sin(lat1 * r) * Math.cos(lat2 * r) * Math.cos((lon2 - lon1) * r);
+  return withOffset((Math.atan2(y, x) * 180) / Math.PI, 0);
+}
+
+/** One CSV line → fields (handles "quoted, fields"). */
+function csvFields(line) {
+  const out = [];
+  let cur = '';
+  let q = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (q) {
+      if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; } else if (ch === '"') q = false; else cur += ch;
+    } else if (ch === '"') q = true;
+    else if (ch === ',') { out.push(cur); cur = ''; } else cur += ch;
+  }
+  out.push(cur);
+  return out;
+}
+
+/**
+ * Runways of one aerodrome from the OurAirports runways.csv text. True headings come from the data,
+ * else from the threshold coordinates, else from the ident (×10, magnetic — approximate).
+ */
+export function parseRunways(csv, icao) {
+  const code = String(icao || '').trim().toUpperCase();
+  if (!code) return [];
+  const lines = String(csv).split(/\r?\n/);
+  const head = csvFields(lines[0]);
+  const col = (n) => head.indexOf(n);
+  const tag = `"${code}"`;
+  const out = [];
+  for (const line of lines) {
+    if (!line.includes(tag)) continue; // cheap pre-filter: the file has ~45 000 runways
+    const f = csvFields(line);
+    if (f[col('airport_ident')] !== code) continue;
+    const n = (k) => (f[col(k)] === '' || f[col(k)] == null ? NaN : Number(f[col(k)]));
+    const end = (p) => ({ id: f[col(`${p}_ident`)] || '', lat: n(`${p}_latitude_deg`), lon: n(`${p}_longitude_deg`), heading: n(`${p}_heading_degT`) });
+    const le = end('le');
+    const he = end('he');
+    const hasLL = [le.lat, le.lon, he.lat, he.lon].every(Number.isFinite);
+    if (!Number.isFinite(le.heading)) {
+      if (hasLL) le.heading = bearing(le.lat, le.lon, he.lat, he.lon);
+      else if (Number.isFinite(he.heading)) le.heading = withOffset(he.heading, 180);
+      else le.heading = withOffset((parseInt(le.id, 10) || 0) * 10, 0) || (parseInt(le.id, 10) ? 360 : 0);
+    }
+    if (!Number.isFinite(he.heading)) he.heading = withOffset(le.heading, 180);
+    out.push({
+      name: `${le.id}/${he.id}`,
+      closed: f[col('closed')] === '1',
+      lengthM: n('length_ft') * 0.3048,
+      widthM: n('width_ft') * 0.3048,
+      le, he, hasLL,
+    });
+  }
+  return out;
+}
+
+/** Runways to draw: `runways` (list or "a, b" text) by name; empty = every open runway. */
+export function selectRunways(all, runways) {
+  const want = (Array.isArray(runways) ? runways : String(runways ?? '').split(','))
+    .map((s) => String(s).trim().toUpperCase()).filter(Boolean);
+  return want.length ? all.filter((r) => want.includes(r.name.toUpperCase())) : all.filter((r) => !r.closed);
+}
+
+/** Where a runway sits on the map, in rose units with north up: centre x/y, true heading h (le end), length L, width W. */
+export function runwayPlacement(rw, center, radiusM, R = 80) {
+  if (!rw.hasLL || !Number.isFinite(center?.lat) || !(radiusM > 0)) return null;
+  const k = R / radiusM;
+  const mLat = (rw.le.lat + rw.he.lat) / 2;
+  const mLon = (rw.le.lon + rw.he.lon) / 2;
+  const east = (mLon - center.lon) * M_PER_DEG * cosd(center.lat);
+  const north = (mLat - center.lat) * M_PER_DEG;
+  const dx = (rw.he.lon - rw.le.lon) * M_PER_DEG * cosd(mLat);
+  const dy = (rw.he.lat - rw.le.lat) * M_PER_DEG;
+  const len = Number.isFinite(rw.lengthM) && rw.lengthM > 0 ? rw.lengthM : Math.hypot(dx, dy);
+  return { x: east * k, y: -north * k, h: rw.le.heading, L: len * k, W: (Number.isFinite(rw.widthM) && rw.widthM > 0 ? rw.widthM : 30) * k };
+}
+
+/** Runway end with the most headwind among runways [{ name, le: { heading } }]; null if none. */
+export function bestRunwayEnd(list, windDir, speed) {
+  let best = null;
+  for (const r of list) {
+    const a = runwayInfo(r.le.heading, windDir, speed, r.name)?.active;
+    if (a && (!best || a.head > best.head)) best = a;
+  }
+  return best;
+}
+
+// OurAirports public data (CC0, CORS-enabled). Parsed runways are cached per code for 30 days.
+const RWY_URL = 'https://davidmegginson.github.io/ourairports-data/runways.csv';
+const RWY_TTL = 30 * 864e5;
+const rwyMem = new Map();
+let rwyCsv = null;
+const store = {
+  get(k) { try { return JSON.parse(globalThis.localStorage?.getItem(k) ?? 'null'); } catch { return null; } },
+  set(k, v) { try { globalThis.localStorage?.setItem(k, JSON.stringify(v)); } catch { /* private mode / full */ } },
+};
+
+/** Runways of an aerodrome (cached). Rejects when the data cannot be downloaded. */
+export function loadRunways(icao) {
+  const code = String(icao || '').trim().toUpperCase();
+  if (!/^[A-Z0-9-]{3,8}$/.test(code)) return Promise.resolve([]);
+  if (rwyMem.has(code)) return rwyMem.get(code);
+  const key = `pt2vhf-wind-rose:rwy:${code}`;
+  const hit = store.get(key);
+  const p = hit && Date.now() - hit.t < RWY_TTL
+    ? Promise.resolve(hit.r)
+    : (rwyCsv ??= fetch(RWY_URL).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.text(); })
+      .catch((e) => { rwyCsv = null; throw e; }))
+      .then((csv) => { const r = parseRunways(csv, code); if (r.length) store.set(key, { t: Date.now(), r }); return r; });
+  p.catch(() => rwyMem.delete(code));
+  rwyMem.set(code, p);
+  return p;
+}
+
+const DEVICE_KEY = 'pt2vhf-wind-rose:device';
+
+/** This device's position (browser geolocation; asks permission). Saved, so the map does not wander. */
+export function deviceLocation() {
+  return new Promise((resolve, reject) => {
+    const g = globalThis.navigator?.geolocation;
+    if (!g) { reject(new Error('Geolocation unavailable (needs HTTPS)')); return; }
+    g.getCurrentPosition((p) => {
+      const ll = [+p.coords.latitude.toFixed(6), +p.coords.longitude.toFixed(6)];
+      store.set(DEVICE_KEY, ll);
+      resolve(ll);
+    }, (e) => reject(new Error(e?.message || 'Location denied')), { enableHighAccuracy: true, timeout: 20000, maximumAge: 60000 });
+  });
+}
+const savedDevice = () => { const v = store.get(DEVICE_KEY); return Array.isArray(v) && v.length === 2 ? v : null; };
+
+/** Runway along bearing h, centred at (x, y): asphalt, threshold stripes, dashed centreline, idents. L, W in rose units. */
+function runwaySvg(rw, h, L, W, x = 0, y = 0) {
   const f2 = (v) => +v.toFixed(2);
-  const L = (2 * R * Math.min(100, Math.max(10, Number(lengthPct) || 70))) / 100;
-  const W = Math.max(3, (2 * R * Math.min(30, Math.max(2, Number(widthPct) || 8))) / 100);
+  W = Math.max(2.5, W);
   const y0 = L / 2; // local frame: -y points to bearing h, so the threshold of the "h" end is at +y (approach side)
   const fs = f2(Math.min(W * 0.7, 9));
   const kh = W * 0.6; // threshold stripe length
@@ -370,7 +535,7 @@ function runwaySvg(rw, h, R, lengthPct, widthPct) {
   };
   const idAt = (id, y, flip) => `<text class="rwy-id" x="0" y="${f2(y)}" font-size="${fs}"${flip ? ` transform="rotate(180 0 ${f2(y)})"` : ''}>${esc(id)}</text>`;
   const idGap = kh + 1.5 + fs * 0.6;
-  return `<g class="runway" transform="rotate(${f2(h)})">`
+  return `<g class="runway" transform="${x || y ? `translate(${f2(x)} ${f2(y)}) ` : ''}rotate(${f2(h)})">`
     + `<rect class="rwy" x="${f2(-W / 2)}" y="${f2(-y0)}" width="${f2(W)}" height="${f2(L)}"/>`
     + `<g class="rwy-mark">${keys(y0 - 1 - kh)}${keys(-y0 + 1)}</g>`
     + idAt(rw.ends[0].id, y0 - idGap, false)
@@ -391,6 +556,8 @@ const EDITOR = {
       sectors: 'Prevailing bins', calm: 'Calm below (speed)', refresh: 'History refresh', max_width: 'Max size', tap_action: 'Tap action',
       map: 'Background map', map_radius: 'Map radius', map_opacity: 'Map opacity', heat_opacity: 'Heat-map opacity',
       map_latitude: 'Map centre latitude', map_longitude: 'Map centre longitude', map_url: 'Custom tile URL',
+      map_center: 'Map centre', map_shift_north: 'Shift north (m)', map_shift_east: 'Shift east (m)',
+      icao: 'Aerodrome ICAO code', runways: 'Runways to draw',
       runway_heading: 'Runway heading (true)', runway_name: 'Runway numbers', runway_length: 'Runway length', runway_width: 'Runway width', runway_wind: 'Headwind / crosswind',
     },
     helpers: {
@@ -407,7 +574,16 @@ const EDITOR = {
       runway_heading: 'True heading of one end in degrees (as on the map). Empty = no runway.',
       runway_name: 'Painted numbers, e.g. 12/30 (they are magnetic). Empty = from the heading.',
       runway_wind: 'Headwind (↓; ↑ = tailwind) and crosswind (← →) for the runway end in use.',
+      map_center: 'home, device (this phone/computer) or an entity with coordinates, e.g. person.me. Latitude/longitude win when filled.',
+      map_shift_north: 'Fine adjustment in metres; negative = south / west. The map preview below sets it by dragging.',
+      icao: 'e.g. SBMT. Runways come from OurAirports; over a map they are drawn at their real place and size, and the map centres on the aerodrome.',
+      runways: 'Empty = all open runways.',
     },
+    position: 'Map position', useLocation: 'Use my location', reset: 'Reset adjustment', step: 'Step',
+    zoomIn: 'Zoom in', zoomOut: 'Zoom out', dragHint: 'Drag to move · wheel, pinch or + − to zoom',
+    north: 'North', south: 'South', west: 'West', east: 'East', locating: 'Locating…',
+    noDevice: 'This device has no saved location yet, so the home / aerodrome is used. Press “Use my location”.',
+    found: (code, list) => `${code}: ${list}`, none: (code) => `${code}: no runways found`, loading: 'Loading runways…',
     appearance: 'Appearance',
     mapSection: 'Background map',
     runwaySection: 'Runway',
@@ -423,6 +599,8 @@ const EDITOR = {
       sectors: 'Setores da predominante', calm: 'Calmaria abaixo de', refresh: 'Atualização do histórico', max_width: 'Tamanho máximo', tap_action: 'Ação ao tocar',
       map: 'Mapa de fundo', map_radius: 'Raio do mapa', map_opacity: 'Opacidade do mapa', heat_opacity: 'Opacidade do mapa de calor',
       map_latitude: 'Latitude do centro', map_longitude: 'Longitude do centro', map_url: 'URL de tiles própria',
+      map_center: 'Centro do mapa', map_shift_north: 'Deslocar ao norte (m)', map_shift_east: 'Deslocar a leste (m)',
+      icao: 'Código ICAO do aeródromo', runways: 'Pistas a desenhar',
       runway_heading: 'Rumo da pista (verdadeiro)', runway_name: 'Números da pista', runway_length: 'Comprimento da pista', runway_width: 'Largura da pista', runway_wind: 'Vento de proa / cruzado',
     },
     helpers: {
@@ -439,7 +617,16 @@ const EDITOR = {
       runway_heading: 'Rumo verdadeiro de uma cabeceira em graus (como no mapa). Vazio = sem pista.',
       runway_name: 'Números pintados, ex.: 12/30 (são magnéticos). Vazio = calculado pelo rumo.',
       runway_wind: 'Vento de proa (↓; ↑ = de cauda) e cruzado (← →) para a cabeceira em uso.',
+      map_center: 'home (casa), device (este celular/computador) ou uma entidade com coordenadas, ex.: person.eu. Latitude/longitude preenchidas têm prioridade.',
+      map_shift_north: 'Ajuste fino em metros; negativo = sul / oeste. A prévia do mapa abaixo ajusta arrastando.',
+      icao: 'ex.: SBMT. As pistas vêm do OurAirports; sobre um mapa ficam no lugar e tamanho reais, e o mapa centraliza no aeródromo.',
+      runways: 'Vazio = todas as pistas abertas.',
     },
+    position: 'Posição do mapa', useLocation: 'Usar minha localização', reset: 'Zerar ajuste', step: 'Passo',
+    zoomIn: 'Aproximar', zoomOut: 'Afastar', dragHint: 'Arraste para mover · roda, pinça ou + − para o zoom',
+    north: 'Norte', south: 'Sul', west: 'Oeste', east: 'Leste', locating: 'Localizando…',
+    noDevice: 'Este aparelho ainda não tem localização salva; usando a casa / o aeródromo. Toque em “Usar minha localização”.',
+    found: (code, list) => `${code}: ${list}`, none: (code) => `${code}: nenhuma pista encontrada`, loading: 'Carregando pistas…',
     appearance: 'Aparência',
     mapSection: 'Mapa de fundo',
     runwaySection: 'Pista',
@@ -488,6 +675,11 @@ export const DEFAULTS = {
   map_latitude: '',
   map_longitude: '',
   map_url: '',
+  map_center: 'home',
+  map_shift_north: 0,
+  map_shift_east: 0,
+  icao: '',
+  runways: [],
   runway_heading: '',
   runway_length: 70,
   runway_width: 8,
@@ -512,6 +704,8 @@ export class WindRoseCard extends Base {
       ...structuredClone(DEFAULTS),
     };
   }
+
+  static getConfigElement() { return document.createElement(EDITOR_TAG); }
 
   static getConfigForm() {
     const T = editorText(pageLang());
@@ -578,6 +772,7 @@ export class WindRoseCard extends Base {
         {
           type: 'expandable', name: '', title: T.mapSection, schema: [
             { name: 'map', selector: { select: { mode: 'dropdown', options: MAP_TYPES } } },
+            { name: 'map_center', selector: { select: { mode: 'dropdown', custom_value: true, options: ['home', 'device'] } } },
             {
               type: 'grid', name: '', schema: [
                 { name: 'map_radius', selector: { number: { min: 10, max: 50000, mode: 'box', unit_of_measurement: 'm' } } },
@@ -585,6 +780,8 @@ export class WindRoseCard extends Base {
                 { name: 'heat_opacity', selector: { number: { min: 0, max: 100, step: 5, mode: 'slider', unit_of_measurement: '%' } } },
                 { name: 'map_latitude', selector: { number: { min: -85, max: 85, step: 'any', mode: 'box' } } },
                 { name: 'map_longitude', selector: { number: { min: -180, max: 180, step: 'any', mode: 'box' } } },
+                { name: 'map_shift_north', selector: { number: { min: -5000, max: 5000, step: 0.1, mode: 'box', unit_of_measurement: 'm' } } },
+                { name: 'map_shift_east', selector: { number: { min: -5000, max: 5000, step: 0.1, mode: 'box', unit_of_measurement: 'm' } } },
               ],
             },
             { name: 'map_url', selector: { text: {} } },
@@ -592,6 +789,8 @@ export class WindRoseCard extends Base {
         },
         {
           type: 'expandable', name: '', title: T.runwaySection, schema: [
+            { name: 'icao', selector: { text: {} } },
+            { name: 'runways', selector: { select: { multiple: true, custom_value: true, options: [] } } },
             {
               type: 'grid', name: '', schema: [
                 { name: 'runway_heading', selector: { number: { min: 0, max: 360, step: 1, mode: 'box', unit_of_measurement: '°' } } },
@@ -643,11 +842,39 @@ export class WindRoseCard extends Base {
   _update(force) {
     if (!this._config || !this._hass) return;
     const c = this._config;
-    const watched = [c.entity, c.direction_entity, c.gust_entity, c.rain_entity].map((id) => this._hass.states[id]);
+    const watched = [c.entity, c.direction_entity, c.gust_entity, c.rain_entity, String(c.map_center || '').includes('.') ? c.map_center : null]
+      .map((id) => this._hass.states[id]);
     const changed = force || watched.some((s, k) => s !== this._last?.[k]);
     this._last = watched;
     if (Date.now() - this._fetchedAt > c.refresh * 1000) this._fetch();
+    this._extras();
     if (changed) this._render();
+  }
+
+  // Aerodrome runways (icao) and this device's location (map_center: device), loaded once.
+  _extras() {
+    const c = this._config;
+    const code = String(c.icao || '').trim().toUpperCase();
+    if (code !== (this._rwyCode ?? '')) {
+      this._rwyCode = code;
+      this._rwys = [];
+      this._rwyErr = null;
+      if (code) {
+        loadRunways(code).then((r) => {
+          if (this._rwyCode !== code) return;
+          this._rwys = r;
+          this._rwyErr = r.length ? null : `${code}: no runways found`;
+          this._render();
+        }).catch((e) => { if (this._rwyCode === code) { this._rwyErr = `${code}: ${e.message}`; this._render(); } });
+      }
+    }
+    if (c.map !== 'none' && c.map_center === 'device' && !this._geo && !this._geoAsked) {
+      this._geoAsked = true;
+      this._geo = savedDevice();
+      if (!this._geo) {
+        deviceLocation().then((ll) => { this._geo = ll; this._render(); }).catch((e) => { this._geoErr = e.message; this._render(); });
+      }
+    }
   }
 
   async _fetch() {
@@ -735,24 +962,41 @@ export class WindRoseCard extends Base {
     // Background map (satellite, streets…) centred on the home location, rotated with the rose.
     let map = '';
     let credit = '';
+    let tilesCredit = '';
     const src = mapSource(c);
+    const rwys = selectRunways(this._rwys || [], c.runways);
+    const ll = rwys.filter((r) => r.hasLL);
+    const aerodrome = ll.length
+      ? [ll.reduce((a, r) => a + r.le.lat + r.he.lat, 0) / (2 * ll.length), ll.reduce((a, r) => a + r.le.lon + r.he.lon, 0) / (2 * ll.length)] : null;
+    const centre = mapCenter(c, hass, { device: this._geo, aerodrome });
+    const radiusM = Number(c.map_radius) || 150;
     if (src) {
-      const num = (v) => (v === '' || v == null ? NaN : Number(v));
-      const lat = Number.isFinite(num(c.map_latitude)) ? num(c.map_latitude) : hass.config?.latitude;
-      const lon = Number.isFinite(num(c.map_longitude)) ? num(c.map_longitude) : hass.config?.longitude;
+      const { lat, lon } = centre;
       const px = Math.max(128, (Number(c.max_width) || 380) * 0.4 * (globalThis.devicePixelRatio || 1));
-      const m = mapTiles(lat, lon, Number(c.map_radius) || 150, R, px, src.max);
+      const m = mapTiles(lat, lon, radiusM, R, px, src.max);
       // +0.2 overlap hides hairline seams between tiles.
       const tiles = m.tiles.map((t) => `<image href="${esc(src.url(m.z, t.x, t.y))}" x="${+t.left.toFixed(3)}" y="${+t.top.toFixed(3)}" width="${+(m.size + 0.2).toFixed(3)}" height="${+(m.size + 0.2).toFixed(3)}" preserveAspectRatio="none"/>`).join('');
       const op = pct(c.map_opacity);
       if (tiles) map = `<g${off ? ` transform="rotate(${off})"` : ''} opacity="${op}">${tiles}</g>`;
+      if (tiles) tilesCredit = src.attribution;
       if (tiles && src.attribution) credit = `<text class="credit" x="0" y="98">${esc(src.attribution)}</text>`;
     }
     const heatOp = pct(c.heat_opacity);
 
-    // Runway centred on the rose, along its heading (rotates with direction_offset).
-    const rw = runwayInfo(c.runway_heading, dir, speed, c.runway_name);
-    const runway = rw ? runwaySvg(rw, view(rw.ends[0].heading), R, c.runway_length, c.runway_width) : '';
+    // Runways rotate with the rose. Aerodrome runways with coordinates sit at their real place and size
+    // over a map; otherwise (and the manual runway_heading) they are drawn through the centre.
+    const lenU = (2 * R * Math.min(100, Math.max(10, Number(c.runway_length) || 70))) / 100;
+    const widU = (2 * R * Math.min(30, Math.max(2, Number(c.runway_width) || 8))) / 100;
+    const manual = runwayInfo(c.runway_heading, dir, speed, c.runway_name);
+    let runway = manual ? runwaySvg(manual, manual.ends[0].heading, lenU, widU) : '';
+    for (const r of rwys) {
+      const info = runwayInfo(r.le.heading, dir, speed, r.name);
+      const p = src ? runwayPlacement(r, centre, radiusM, R) : null;
+      runway += p ? runwaySvg(info, p.h, p.L, p.W, p.x, p.y) : runwaySvg(info, r.le.heading, lenU, widU);
+    }
+    if (runway) runway = `<g clip-path="url(#disc)"><g${off ? ` transform="rotate(${off})"` : ''}>${runway}</g></g>`;
+    const rwEnd = bestRunwayEnd([...(manual ? [{ name: manual.ends.map((e) => e.id).join('/'), le: { heading: manual.ends[0].heading } }] : []), ...rwys], dir, speed);
+    if (this._rwyErr) credit = `<text class="credit" x="0" y="98">${esc([tilesCredit, this._rwyErr].filter(Boolean).join(' · '))}</text>`;
 
     // Grid is decoration only: ring count/visibility never touches the heat map.
     let grid = c.show_rim === false ? '' : `<circle r="${R}"/>`;
@@ -793,10 +1037,10 @@ export class WindRoseCard extends Base {
       + (hist ? corner(98, 78, 'end', windowLabel(lang, windowMinutes(c)), hist) : '');
 
     let rwyWind = '';
-    if (rw?.active && c.runway_wind !== false) {
-      const a = rw.active;
-      rwyWind = `<text class="rwy-wind" x="-98" y="-66" text-anchor="start"><tspan class="unit">${a.id} </tspan>${a.head >= 0 ? '↓' : '↑'} ${nf.format(Math.abs(a.head))}${u(` ${unit}`)}</text>`
-        + `<text class="rwy-wind" x="98" y="-66" text-anchor="end">${a.side === 'R' ? '←' : '→'} ${nf.format(a.cross)}${u(` ${unit}`)}</text>`;
+    if (rwEnd && c.runway_wind !== false) {
+      const a = rwEnd;
+      rwyWind = `<text class="rwy-wind" x="-98" y="-66" text-anchor="start"><tspan class="unit">${esc(a.id)} </tspan>${a.head >= 0 ? '↓' : '↑'} ${nf.format(Math.abs(a.head))}</text>`
+        + `<text class="rwy-wind" x="98" y="-66" text-anchor="end">${a.side === 'R' ? '←' : '→'} ${nf.format(a.cross)}</text>`;
     }
 
     if (!this._root) {
@@ -819,7 +1063,7 @@ export class WindRoseCard extends Base {
   .rwy-mark rect { fill: #fff; }
   .rwy-cl { stroke: #fff; stroke-width: .7; stroke-dasharray: 3 2.5; }
   text.rwy-id { fill: #fff; text-anchor: middle; font-weight: 700; }
-  text.rwy-wind { font-size: 9px; fill: var(--primary-text-color); opacity: .85; }
+  text.rwy-wind { font-size: 7.5px; fill: var(--primary-text-color); opacity: .85; }
   text.credit { font-size: 4px; text-anchor: middle; opacity: .6; }
   text.scale { font-size: 6.5px; text-anchor: middle; opacity: .8; }
   text.lbl { font-size: 7.5px; opacity: .8; }
@@ -853,6 +1097,232 @@ export class WindRoseCard extends Base {
   }
 }
 
+const EDITOR_TAG = `${TAG}-editor`;
+
+/**
+ * Visual editor: HA's own form (same fields as getConfigForm) plus a "Map position" panel with a live
+ * map preview — drag to move, wheel / pinch / + − to zoom, arrow buttons, "use my location".
+ * Everything it changes is saved in the card config (map_shift_north/east, map_radius, map_latitude/longitude).
+ */
+export class WindRoseEditor extends Base {
+  setConfig(config) {
+    this._config = { ...config };
+    this._render();
+  }
+
+  set hass(hass) {
+    const first = !this._hass;
+    this._hass = hass;
+    if (this._form) this._form.hass = hass;
+    if (first) this._render();
+  }
+
+  connectedCallback() {
+    // ha-form is lazy-loaded by HA; loading a built-in card editor makes sure it is defined.
+    if (!customElements.get('ha-form')) {
+      Promise.resolve(window.loadCardHelpers?.())
+        .then((h) => h?.createCardElement({ type: 'entities', entities: [] }))
+        .then((el) => el?.constructor?.getConfigElement?.())
+        .catch(() => {});
+    }
+    this._render();
+  }
+
+  _emit(patch) {
+    this._config = { ...this._config, ...patch };
+    this.dispatchEvent(new CustomEvent('config-changed', { detail: { config: this._config }, bubbles: true, composed: true }));
+    this._render();
+  }
+
+  _render() {
+    if (!this._config || !this.isConnected) return;
+    const T = editorText(this._hass?.locale?.language || this._hass?.language || pageLang());
+    if (!this._root) {
+      this._root = this.attachShadow({ mode: 'open' });
+      this._root.innerHTML = `<style>
+  .pos { margin-top: 16px; border: 1px solid var(--divider-color, #8884); border-radius: 12px; padding: 12px; }
+  .pos h3 { margin: 0 0 8px; font-size: 1rem; font-weight: 500; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  svg.mini { width: 200px; max-width: 100%; aspect-ratio: 1; touch-action: none; cursor: grab; border-radius: 50%; background: var(--secondary-background-color, #8882); }
+  svg.mini.drag { cursor: grabbing; }
+  .rim { fill: none; stroke: var(--primary-text-color); stroke-opacity: .5; stroke-width: 1; }
+  .cross { stroke: #e8553e; stroke-width: 1.5; }
+  .ctl { display: grid; grid-template-columns: repeat(3, 40px); gap: 6px; }
+  button { font: inherit; min-width: 40px; min-height: 40px; border-radius: 8px; border: 1px solid var(--divider-color, #8884);
+    background: var(--card-background-color, #fff); color: var(--primary-text-color); cursor: pointer; }
+  button:hover { border-color: var(--primary-color); }
+  button:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 1px; }
+  .side { display: flex; flex-direction: column; gap: 8px; }
+  .side label { display: flex; gap: 6px; align-items: center; font-size: .9rem; }
+  select { font: inherit; padding: 4px; border-radius: 6px; }
+  .wide { padding: 0 12px; }
+  .note { font-size: .85rem; color: var(--secondary-text-color); margin-top: 8px; }
+  .err { color: var(--error-color, #db4437); }
+  .rwy { fill: #1d1d1d; fill-opacity: .85; stroke: #fff; stroke-width: .6; }
+</style><div id="form"></div><div id="pos"></div>`;
+      this._form = document.createElement('ha-form');
+      this._form.addEventListener('value-changed', (e) => {
+        e.stopPropagation();
+        this._emit(e.detail.value);
+      });
+      this._root.getElementById('form').append(this._form);
+    }
+    const c = this._config;
+    // Runway list for the ICAO code, offered in the "Runways to draw" dropdown.
+    const code = String(c.icao || '').trim().toUpperCase();
+    if (code !== (this._code ?? '')) {
+      this._code = code;
+      this._rwyList = [];
+      this._rwyNote = code ? T.loading : '';
+      if (code) {
+        loadRunways(code).then((r) => {
+          if (this._code !== code) return;
+          this._rwyList = r;
+          this._rwyNote = r.length ? T.found(code, r.map((x) => x.name + (x.closed ? ' ✕' : '')).join(', ')) : T.none(code);
+          this._render();
+        }).catch((e) => { if (this._code === code) { this._rwyNote = `${code}: ${e.message}`; this._render(); } });
+      }
+    }
+    const form = (this._schema ??= WindRoseCard.getConfigForm());
+    const patch = (schema) => schema.forEach((s) => {
+      if (s.schema) patch(s.schema);
+      if (s.name === 'runways') s.selector.select.options = (this._rwyList || []).map((r) => r.name);
+    });
+    if (this._patched !== this._rwyList) { this._patched = this._rwyList; patch(form.schema); form.schema = [...form.schema]; }
+    this._form.hass = this._hass;
+    this._form.data = c;
+    this._form.schema = form.schema;
+    this._form.computeLabel = form.computeLabel;
+    this._form.computeHelper = (s) => (s.name === 'icao' && this._rwyNote ? this._rwyNote : form.computeHelper(s));
+    this._renderPosition(T);
+  }
+
+  _renderPosition(T) {
+    const pos = this._root.getElementById('pos');
+    const c = { ...DEFAULTS, ...this._config };
+    const src = mapSource(c);
+    if (!src) { pos.innerHTML = ''; return; }
+    const rwys = selectRunways(this._rwyList || [], c.runways);
+    const ll = rwys.filter((r) => r.hasLL);
+    const aerodrome = ll.length
+      ? [ll.reduce((a, r) => a + r.le.lat + r.he.lat, 0) / (2 * ll.length), ll.reduce((a, r) => a + r.le.lon + r.he.lon, 0) / (2 * ll.length)] : null;
+    const centre = mapCenter(c, this._hass, { device: savedDevice(), aerodrome });
+    const radius = Number(c.map_radius) || 150;
+    const R = 80;
+    const m = mapTiles(centre.lat, centre.lon, radius, R, 100 * (globalThis.devicePixelRatio || 1), src.max);
+    const tiles = m.tiles.map((t) => `<image href="${esc(src.url(m.z, t.x, t.y))}" x="${+t.left.toFixed(3)}" y="${+t.top.toFixed(3)}" width="${+(m.size + 0.2).toFixed(3)}" height="${+(m.size + 0.2).toFixed(3)}" preserveAspectRatio="none"/>`).join('');
+    const runways = rwys.map((r) => {
+      const p = runwayPlacement(r, centre, radius, R);
+      return p ? `<rect class="rwy" x="${-p.W / 2}" y="${-p.L / 2}" width="${Math.max(1.5, p.W)}" height="${p.L}" transform="translate(${p.x} ${p.y}) rotate(${p.h})"/>` : '';
+    }).join('');
+    const step = this._step || 5;
+    const focus = ['data-move', 'data-zoom', 'data-reset', 'id'].map((k) => { const v = this._root.activeElement?.getAttribute(k); return v == null ? '' : `[${k}="${v}"]`; }).find(Boolean);
+    const fmt = (v) => new Intl.NumberFormat(undefined, { maximumFractionDigits: 6 }).format(v);
+    pos.innerHTML = `<div class="pos">
+  <h3>${T.position}</h3>
+  <div class="row">
+    <svg class="mini" viewBox="-80 -80 160 160" role="img" aria-label="${esc(T.dragHint)}">
+      <clipPath id="c"><circle r="80"/></clipPath>
+      <g clip-path="url(#c)"><g id="pan">${tiles}${runways}</g></g>
+      <circle class="rim" r="79.5"/>
+      <path class="cross" d="M-8 0H8M0-8V8"/>
+    </svg>
+    <div class="side">
+      <div class="ctl">
+        <span></span><button data-move="n" title="${T.north}" aria-label="${T.north}">↑</button><button data-zoom="in" title="${T.zoomIn}" aria-label="${T.zoomIn}">+</button>
+        <button data-move="w" title="${T.west}" aria-label="${T.west}">←</button><button data-reset title="${T.reset}" aria-label="${T.reset}">⌖</button><button data-move="e" title="${T.east}" aria-label="${T.east}">→</button>
+        <span></span><button data-move="s" title="${T.south}" aria-label="${T.south}">↓</button><button data-zoom="out" title="${T.zoomOut}" aria-label="${T.zoomOut}">−</button>
+      </div>
+      <label>${T.step} <select id="step">${[1, 5, 25, 100].map((v) => `<option value="${v}"${v === step ? ' selected' : ''}>${v} m</option>`).join('')}</select></label>
+      <button class="wide" id="locate">${T.useLocation}</button>
+    </div>
+  </div>
+  <div class="note">${esc(T.dragHint)} · ${fmt(radius)} m · ${Number.isFinite(centre.lat) ? `${fmt(centre.lat)}, ${fmt(centre.lon)}` : '—'}
+    ${c.map_center === 'device' && centre.source !== 'device' && centre.source !== 'manual' ? `<div class="err">${T.noDevice}</div>` : ''}
+    ${this._geoNote ? `<div class="${this._geoErr ? 'err' : ''}">${esc(this._geoNote)}</div>` : ''}</div>
+</div>`;
+    this._wirePosition(pos, c, radius, R);
+    if (focus) pos.querySelector(focus)?.focus();
+  }
+
+  _wirePosition(pos, c, radius, R) {
+    const svg = pos.querySelector('svg.mini');
+    const pan = pos.querySelector('#pan');
+    const round = (v) => Math.round(v * 10) / 10;
+    const shift = (north, east) => this._emit({
+      map_shift_north: round((Number(c.map_shift_north) || 0) + north),
+      map_shift_east: round((Number(c.map_shift_east) || 0) + east),
+    });
+    const zoom = (f) => this._emit({ map_radius: Math.round(Math.min(50000, Math.max(10, radius / f))) });
+    const step = () => this._step || 5;
+    pos.querySelectorAll('[data-move]').forEach((b) => b.addEventListener('click', () => {
+      const d = { n: [1, 0], s: [-1, 0], e: [0, 1], w: [0, -1] }[b.dataset.move];
+      shift(d[0] * step(), d[1] * step());
+    }));
+    pos.querySelectorAll('[data-zoom]').forEach((b) => b.addEventListener('click', () => zoom(b.dataset.zoom === 'in' ? 1.25 : 0.8)));
+    pos.querySelector('[data-reset]').addEventListener('click', () => this._emit({ map_shift_north: 0, map_shift_east: 0 }));
+    pos.querySelector('#step').addEventListener('change', (e) => { this._step = Number(e.target.value); });
+    pos.querySelector('#locate').addEventListener('click', () => {
+      const T = editorText(this._hass?.locale?.language || pageLang());
+      this._geoNote = T.locating;
+      this._geoErr = false;
+      this._render();
+      deviceLocation().then(([lat, lon]) => {
+        this._geoNote = '';
+        this._emit({ map_latitude: lat, map_longitude: lon, map_shift_north: 0, map_shift_east: 0 });
+      }).catch((e) => { this._geoNote = e.message; this._geoErr = true; this._render(); });
+    });
+
+    // Drag to move, pinch / wheel to zoom. The preview moves live; the config is saved on release.
+    const unit = () => 160 / svg.getBoundingClientRect().width; // svg units per CSS px
+    const pts = new Map();
+    let start = null;
+    let dx = 0;
+    let dy = 0;
+    let k = 1;
+    const live = () => pan.setAttribute('transform', `translate(${dx} ${dy}) scale(${k})`);
+    const spread = () => { const [a, b] = [...pts.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
+    svg.addEventListener('pointerdown', (e) => {
+      svg.setPointerCapture(e.pointerId);
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      start = { x: e.clientX, y: e.clientY, dx, dy, k, d: pts.size === 2 ? spread() : 0 };
+      svg.classList.add('drag');
+    });
+    svg.addEventListener('pointermove', (e) => {
+      if (!pts.has(e.pointerId) || !start) return;
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pts.size === 2 && start.d) k = Math.min(8, Math.max(0.125, start.k * (spread() / start.d)));
+      else if (pts.size === 1) { dx = start.dx + (e.clientX - start.x) * unit(); dy = start.dy + (e.clientY - start.y) * unit(); }
+      live();
+    });
+    const end = (e) => {
+      if (!pts.delete(e.pointerId)) return;
+      if (pts.size) { const [p] = pts.values(); start = { x: p.x, y: p.y, dx, dy, k, d: 0 }; return; }
+      svg.classList.remove('drag');
+      start = null;
+      const mpu = radius / R / k; // metres per svg unit after the zoom
+      const patch = {};
+      if (Math.abs(dx) + Math.abs(dy) > 0.5) {
+        // Dragging the map right brings what was west to the centre: the centre moves west.
+        patch.map_shift_north = round((Number(c.map_shift_north) || 0) + dy * mpu);
+        patch.map_shift_east = round((Number(c.map_shift_east) || 0) - dx * mpu);
+      }
+      if (Math.abs(k - 1) > 0.01) patch.map_radius = Math.round(Math.min(50000, Math.max(10, radius / k)));
+      if (Object.keys(patch).length) this._emit(patch);
+    };
+    svg.addEventListener('pointerup', end);
+    svg.addEventListener('pointercancel', end);
+    let wheelT = 0;
+    svg.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      k = Math.min(8, Math.max(0.125, k * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+      live();
+      clearTimeout(wheelT);
+      wheelT = setTimeout(() => { const kk = k; k = 1; dx = 0; dy = 0; this._emit({ map_radius: Math.round(Math.min(50000, Math.max(10, radius / kk))) }); }, 350);
+    }, { passive: false });
+  }
+}
+
 // Only the first copy that loads is used. A second dashboard resource (often an older version left
 // behind) silently wins the race, so say so loudly — this is the usual cause of "option X does nothing".
 const loaded = globalThis.customElements?.get(TAG);
@@ -862,6 +1332,7 @@ if (loaded && loaded.VERSION !== VERSION) {
 }
 if (globalThis.customElements && !loaded) {
   customElements.define(TAG, WindRoseCard);
+  if (!customElements.get(EDITOR_TAG)) customElements.define(EDITOR_TAG, WindRoseEditor);
   window.customCards = window.customCards || [];
   window.customCards.push({
     type: TAG,

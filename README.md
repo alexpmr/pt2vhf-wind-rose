@@ -77,6 +77,7 @@ plume_width: 15           # plume thickness (degrees)
 plume_fade: 40            # how gradually each plume tip fades (% of radius)
 smooth: 8                 # spot softness (heat_mode: spots)
 heat_motion: false        # true = heat map sways and flickers, mostly with the gusts
+heat_fire: false          # true = heat map burns like fire blown by the wind
 calm: 0.5                 # speeds below this are left out
 max_speed: 0              # 0 = auto scale
 # Orientation
@@ -153,6 +154,7 @@ A new card added from the card picker starts with this full list (the same optio
 | `plume_fade` | `40` | How gradually each plume tip fades, in % of the radius: higher removes hard arcs (useful with sensors that report speed in steps); 0 = sharp tip. |
 | `smooth` | `8` | Spot size for `heat_mode: spots` (% of the radius). |
 | `heat_motion` | `false` | Animates the heat map: it sways side to side like a windsock and flickers like a flame, both mostly following how far the gusts exceed the speed (the speed adds a little). Turned off when the device asks for reduced motion. |
+| `heat_fire` | `false` | The heat map burns like fire blown by the wind: flame tongues run downwind (along the current direction, or the prevailing one when calm); gusts make them lick further, speed makes them faster. Works with or without `heat_motion`; looks best with `heat_direction: to`. Uses more processing than `heat_motion`; off when the device asks for reduced motion. |
 | `refresh` | `60` | Seconds between history reloads. |
 | `map` | `none` | Background map under the heat map: `satellite` (Esri World Imagery), `streets` (Esri), `topo` (OpenTopoMap), `light` / `dark` (Esri Canvas), or `custom` with `map_url`. It rotates with `direction_offset`. |
 | `map_radius` | `150` | Metres from the centre to the rim. The zoom is picked from it. |

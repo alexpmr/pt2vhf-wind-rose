@@ -4,7 +4,7 @@
  * comes FROM, distance from the centre = speed, colour = how much time it blew there.
  * https://github.com/alexpmr/pt2vhf-wind-rose
  */
-const VERSION = '0.12.1';
+const VERSION = '0.13.0';
 const TAG = 'pt2vhf-wind-rose-card';
 
 const STR = {
@@ -166,6 +166,31 @@ export function heatMotion(heat, { on, speed, gust, max, now = 0 }) {
   const delay = (t) => `animation-delay:${-Math.round(now % t)}ms`;
   return `<g class="sway" style="--wr-sway:${sway}deg;animation-duration:${tSway}ms;${delay(tSway)}">`
     + `<g class="flick" style="--wr-pulse:${pulse};animation-duration:${tFlick}ms;${delay(tFlick)}">${heat}</g></g>`;
+}
+
+/**
+ * heat_fire: the heat map burns like fire blown by the wind. Stretched noise (flame tongues) scrolls
+ * downwind and bends the heat's edges. The filter works in a frame turned to the downwind bearing
+ * `flow`, so the scroll is always "up" there and loops seamlessly over one stitched tile (60 units).
+ * Gusts make the tongues lick further; speed makes them run faster. SMIL begins in the past so the
+ * phase survives re-renders.
+ */
+export function heatFire(heat, { on, flow, speed, gust, max, now = 0 }) {
+  if (!on || !heat) return { defs: '', svg: heat };
+  const m = Number(max) > 0 ? Number(max) : 1;
+  const q = (v) => Math.round(Math.min(1, Math.max(0, Number(v) || 0)) * 4) / 4;
+  const k = q((Number(speed) || 0) / m);
+  const g = q(((Number(gust) || 0) - (Number(speed) || 0)) / m * 2);
+  const scale = +(6 + 3 * k + 9 * g).toFixed(1);
+  const dur = Math.round(2600 - 1500 * k - 400 * g);
+  const f = Number.isFinite(Number(flow)) ? Math.round(Number(flow)) : 0;
+  const T = 60;
+  const defs = `<filter id="fire" filterUnits="userSpaceOnUse" x="-90" y="-90" width="180" height="${180 + T}">`
+    + `<feTurbulence type="fractalNoise" baseFrequency="0.09 0.035" numOctaves="2" seed="7" stitchTiles="stitch" x="-90" y="-90" width="180" height="${T}"/>`
+    + `<feTile y="-90" height="${180 + T}"/>`
+    + `<feOffset result="n"><animate attributeName="dy" from="0" to="-${T}" dur="${dur}ms" begin="${-(Math.round(now % dur) / 1000)}s" repeatCount="indefinite"/></feOffset>`
+    + `<feDisplacementMap in="SourceGraphic" in2="n" scale="${scale}" xChannelSelector="R" yChannelSelector="G"/></filter>`;
+  return { defs, svg: `<g transform="rotate(${f})"><g filter="url(#fire)"><g transform="rotate(${-f})">${heat}</g></g></g>` };
 }
 
 /**
@@ -571,7 +596,7 @@ const EDITOR = {
       entity: 'Wind speed', direction_entity: 'Wind direction (degrees)', gust_entity: 'Gust', rain_entity: 'Rain',
       name: 'Name', window: 'Heat-map window', direction_offset: 'Rotate rose (display only)', max_speed: 'Max speed (0 = auto)',
       heat_mode: 'Heat-map style', heat_direction: 'Heat-map points', plume_width: 'Plume thickness', plume_fade: 'Plume tip fade',
-      smooth: 'Spot softness', heat_motion: 'Animate heat map', pointer: 'Pointer style', pointer_color: 'Pointer colour (CSS)',
+      smooth: 'Spot softness', heat_motion: 'Animate heat map', heat_fire: 'Fire blown by the wind', pointer: 'Pointer style', pointer_color: 'Pointer colour (CSS)',
       show_guide: 'Arrow guide line', show_speed: 'Current speed dot', show_gust: 'Gust ring', show_rim: 'Outer circle',
       show_rings: 'Speed rings', show_spokes: 'Spokes', show_scale: 'Scale label', rings: 'Ring count',
       sectors: 'Prevailing bins', calm: 'Calm below (speed)', refresh: 'History refresh', max_width: 'Max size', tap_action: 'Tap action',
@@ -587,6 +612,7 @@ const EDITOR = {
       plume_fade: 'How gradually each plume tip fades. Higher removes hard arcs; 0 = sharp tip.',
       smooth: 'Only used when the heat-map style is "spots".',
       heat_motion: 'Sways like a windsock and flickers like a flame, mostly with the gusts (the speed adds a little). Off when the device asks for reduced motion.',
+      heat_fire: 'Flames run downwind along the heat map; gusts make them lick further, speed makes them faster. Uses more processing than the sway.',
       direction_offset: 'Turns the whole rose clockwise to match how you face the screen. Values stay true.',
       show_guide: 'Only for the "arrow" pointer.',
       map: 'Tiles are downloaded from the provider for the map centre (your home by default).',
@@ -615,7 +641,7 @@ const EDITOR = {
       entity: 'Velocidade do vento', direction_entity: 'Direção do vento (graus)', gust_entity: 'Rajada', rain_entity: 'Chuva',
       name: 'Nome', window: 'Janela do mapa de calor', direction_offset: 'Girar a rosa (só exibição)', max_speed: 'Velocidade máxima (0 = auto)',
       heat_mode: 'Estilo do mapa de calor', heat_direction: 'Sentido do mapa de calor', plume_width: 'Espessura das plumas',
-      plume_fade: 'Esmaecimento da ponta', smooth: 'Suavidade das manchas', heat_motion: 'Animar o mapa de calor', pointer: 'Estilo do ponteiro', pointer_color: 'Cor do ponteiro (CSS)',
+      plume_fade: 'Esmaecimento da ponta', smooth: 'Suavidade das manchas', heat_motion: 'Animar o mapa de calor', heat_fire: 'Fogo soprado pelo vento', pointer: 'Estilo do ponteiro', pointer_color: 'Cor do ponteiro (CSS)',
       show_guide: 'Linha guia da seta', show_speed: 'Ponto da velocidade', show_gust: 'Círculo da rajada', show_rim: 'Círculo externo',
       show_rings: 'Anéis de velocidade', show_spokes: 'Linhas dos setores', show_scale: 'Número da escala', rings: 'Quantidade de anéis',
       sectors: 'Setores da predominante', calm: 'Calmaria abaixo de', refresh: 'Atualização do histórico', max_width: 'Tamanho máximo', tap_action: 'Ação ao tocar',
@@ -631,6 +657,7 @@ const EDITOR = {
       plume_fade: 'Quanto a ponta de cada pluma se desfaz. Maior tira os arcos duros; 0 = ponta seca.',
       smooth: 'Só vale quando o estilo do mapa é "spots".',
       heat_motion: 'Balança como biruta e tremula como chama, principalmente com as rajadas (a velocidade soma um pouco). Desliga se o aparelho pedir menos movimento.',
+      heat_fire: 'Labaredas correm a favor do vento pelo mapa de calor; as rajadas fazem lamber mais longe e a velocidade, correr mais rápido. Usa mais processamento que o balanço.',
       direction_offset: 'Gira a rosa inteira no sentido horário para combinar com a sua posição. Os valores continuam reais.',
       show_guide: 'Só para o ponteiro "arrow".',
       map: 'As imagens são baixadas do provedor para o centro do mapa (sua casa por padrão).',
@@ -676,6 +703,7 @@ export const DEFAULTS = {
   plume_fade: 40,
   smooth: 8,
   heat_motion: false,
+  heat_fire: false,
   calm: 0.5,
   max_speed: 0,
   direction_offset: 0,
@@ -767,6 +795,7 @@ export class WindRoseCard extends Base {
             { name: 'plume_fade', selector: { number: { min: 0, max: 80, step: 1, mode: 'slider', unit_of_measurement: '%' } } },
             { name: 'smooth', selector: { number: { min: 2, max: 25, step: 1, mode: 'slider' } } },
             { name: 'heat_motion', selector: { boolean: {} } },
+            { name: 'heat_fire', selector: { boolean: {} } },
           ],
         },
         {
@@ -1007,6 +1036,13 @@ export class WindRoseCard extends Base {
       if (tiles && src.attribution) credit = `<text class="credit" x="0" y="98">${esc(src.attribution)}</text>`;
     }
     const heatOp = pct(c.heat_opacity);
+    // Flames run downwind: the current direction, or the prevailing one when it is calm.
+    const now = globalThis.performance?.now() ?? 0;
+    const quiet = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const blowFrom = Number.isFinite(dir) && speed >= (Number(c.calm) || 0) && speed > 0 ? dir
+      : rose?.prevailing >= 0 ? rose.prevailing * step : dir;
+    const fire = heatFire(heat, { on: c.heat_fire === true && !quiet, flow: withOffset(view(blowFrom), 180), speed, gust, max, now });
+    const heatLayer = heatMotion(fire.svg, { on: c.heat_motion === true, speed, gust, max, now });
 
     // Runways rotate with the rose. Aerodrome runways with coordinates sit at their real place and size
     // over a map; otherwise (and the manual runway_heading) they are drawn through the centre.
@@ -1122,9 +1158,9 @@ export class WindRoseCard extends Base {
   <svg viewBox="-100 -100 200 200" role="img" aria-label="${esc(`${big} ${unit} ${Number.isFinite(dir) ? dirName(dir) : ''}`)}">
     ${this._error ? `<title>${esc(this._error)}</title>` : ''}
     <defs>
-      <clipPath id="disc"><circle r="${R}"/></clipPath>
+      <clipPath id="disc"><circle r="${R}"/></clipPath>${fire.defs}
     </defs>
-    <g clip-path="url(#disc)">${map}<g opacity="${heatOp}">${heatMotion(heat, { on: c.heat_motion === true, speed, gust, max, now: globalThis.performance?.now() ?? 0 })}</g></g>
+    <g clip-path="url(#disc)">${map}<g opacity="${heatOp}">${heatLayer}</g></g>
     ${runway}
     <g class="grid">${grid}</g>
     ${labels}${scale}${marker}${corners}${rwyWind}${credit}

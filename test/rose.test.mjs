@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  computeRose, toSeries, sectorOf, niceMax, isRaining, density, withOffset, windowMinutes, windowLabel, pointerSvg, plume, heatMotion, WindRoseCard, DEFAULTS, editorText, mapTiles, mapSource, runwayInfo, shiftLatLon, mapCenter, parseRunways, runwayPlacement, selectRunways, bestRunwayEnd,
+  computeRose, toSeries, sectorOf, niceMax, isRaining, density, withOffset, windowMinutes, windowLabel, pointerSvg, plume, heatMotion, heatFire, WindRoseCard, DEFAULTS, editorText, mapTiles, mapSource, runwayInfo, shiftLatLon, mapCenter, parseRunways, runwayPlacement, selectRunways, bestRunwayEnd,
 } from '../pt2vhf-wind-rose-card.js';
 
 // Value of an n×n grid at polar (rho in unit radius, bearing in degrees; 0 = N, clockwise).
@@ -165,6 +165,24 @@ test('heatMotion: off = untouched; on = sways with speed and flickers with gusts
   // Re-rendering later keeps the same phase (negative delay = time already elapsed in the cycle).
   assert.match(heatMotion(svg, { on: true, speed: 0, max: 10, now: 1000 }), /animation-delay:-1000ms/);
   assert.ok(Number.isFinite(vars(heatMotion(svg, { on: true, speed: NaN, gust: NaN, max: 0 })).sway));
+});
+
+test('heatFire: off = untouched; on = flames run downwind, lick more with gusts, run faster with speed', () => {
+  const svg = '<image/>';
+  assert.deepEqual(heatFire(svg, { on: false, flow: 90 }), { defs: '', svg });
+  assert.deepEqual(heatFire('', { on: true, flow: 90 }), { defs: '', svg: '' });
+  const f = (o) => heatFire(svg, { on: true, flow: 135, max: 10, ...o });
+  const calm = f({ speed: 0, gust: 0 });
+  assert.match(calm.defs, /<filter id="fire"[\s\S]*feTurbulence[\s\S]*stitchTiles="stitch"[\s\S]*feDisplacementMap/);
+  // Flow is "up" inside a frame turned to the downwind bearing; the heat is turned back so it stays put.
+  assert.match(calm.svg, /^<g transform="rotate\(135\)"><g filter="url\(#fire\)"><g transform="rotate\(-135\)"><image\/><\/g><\/g><\/g>$/);
+  const scale = (d) => +d.match(/scale="([\d.]+)"/)[1];
+  const dur = (d) => +d.match(/dur="(\d+)ms"/)[1];
+  assert.ok(scale(calm.defs) > 0, 'calm still flickers a little');
+  assert.ok(scale(f({ speed: 4, gust: 12 }).defs) > scale(f({ speed: 4, gust: 4 }).defs), 'gusts lick more');
+  assert.ok(dur(f({ speed: 10, gust: 10 }).defs) < dur(calm.defs), 'more wind, faster flames');
+  assert.match(f({ speed: 0, now: 500 }).defs, /begin="-0\.5s"/, 'phase survives re-renders');
+  assert.ok(Number.isFinite(scale(heatFire(svg, { on: true, flow: NaN, speed: NaN, gust: NaN, max: 0 }).defs)));
 });
 
 test('ring count never changes the heat map', () => {

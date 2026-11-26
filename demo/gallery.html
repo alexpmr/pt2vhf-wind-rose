@@ -55,6 +55,12 @@
       ['heat_motion: false', {}],
       ['heat_motion: true', { heat_motion: true }],
       ['true + heat_direction: to', { heat_motion: true, heat_direction: 'to' }],
+      ['heat_fire: true, to', { heat_fire: true, heat_direction: 'to', plume_width: 18, plume_fade: 24, direction_offset: 45, show_rings: false, show_spokes: false }],
+      ['heat_fire + heat_motion, to', { heat_fire: true, heat_motion: true, heat_direction: 'to', plume_width: 18, plume_fade: 24, direction_offset: 45, show_rings: false, show_spokes: false }],
+    ],
+    // heat_fire on its own, large, with a common heat_direction: to setup.
+    fire: [
+      ['heat_fire: true', { heat_fire: true, heat_motion: true, heat_direction: 'to', plume_width: 18, plume_fade: 24, direction_offset: 45, show_rings: false, show_spokes: false, show_speed: false, show_gust: false }, 420],
     ],
     grid: [
       ['default grid', {}],

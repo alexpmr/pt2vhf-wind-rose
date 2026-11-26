@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  computeRose, toSeries, sectorOf, niceMax, isRaining, density, withOffset, windowMinutes, windowLabel, pointerSvg, plume, WindRoseCard, DEFAULTS, editorText, mapTiles, mapSource, runwayInfo, shiftLatLon, mapCenter, parseRunways, runwayPlacement, selectRunways, bestRunwayEnd,
+  computeRose, toSeries, sectorOf, niceMax, isRaining, density, withOffset, windowMinutes, windowLabel, pointerSvg, plume, heatMotion, WindRoseCard, DEFAULTS, editorText, mapTiles, mapSource, runwayInfo, shiftLatLon, mapCenter, parseRunways, runwayPlacement, selectRunways, bestRunwayEnd,
 } from '../pt2vhf-wind-rose-card.js';
 
 // Value of an n×n grid at polar (rho in unit radius, bearing in degrees; 0 = N, clockwise).
@@ -143,6 +143,26 @@ test('pointerSvg: the arrow guide line can be turned off', () => {
   const noGuide = pointerSvg('arrow', 90, 80, { guide: false });
   assert.doesNotMatch(noGuide, /class="guide"/);
   assert.match(noGuide, /class="arrow"/);
+});
+
+test('heatMotion: off = untouched; on = sways with speed and flickers with gusts', () => {
+  const svg = '<image/>';
+  assert.equal(heatMotion(svg, { on: false, speed: 10, max: 10 }), svg);
+  assert.equal(heatMotion('', { on: true, speed: 10, max: 10 }), '');
+  const vars = (s) => Object.fromEntries([...s.matchAll(/--wr-(\w+):([\d.]+)/g)].map((m) => [m[1], +m[2]]));
+  const dur = (s) => [...s.matchAll(/animation-duration:(\d+)ms/g)].map((m) => +m[1]);
+  const calm = heatMotion(svg, { on: true, speed: 0, max: 10 });
+  const strong = heatMotion(svg, { on: true, speed: 10, max: 10 });
+  const gusty = heatMotion(svg, { on: true, speed: 4, gust: 12, max: 10 });
+  const steady = heatMotion(svg, { on: true, speed: 4, gust: 4, max: 10 });
+  assert.ok(calm.includes(svg) && /class="sway"/.test(calm) && /class="flick"/.test(calm));
+  assert.ok(vars(strong).sway > vars(calm).sway, 'more wind, more sway');
+  assert.ok(dur(strong)[0] < dur(calm)[0], 'more wind, faster');
+  assert.ok(vars(gusty).pulse > vars(steady).pulse, 'gusts flicker more');
+  assert.ok(dur(gusty)[1] < dur(steady)[1], 'gusts flicker faster');
+  // Re-rendering later keeps the same phase (negative delay = time already elapsed in the cycle).
+  assert.match(heatMotion(svg, { on: true, speed: 0, max: 10, now: 1000 }), /animation-delay:-1000ms/);
+  assert.ok(Number.isFinite(vars(heatMotion(svg, { on: true, speed: NaN, gust: NaN, max: 0 })).sway));
 });
 
 test('ring count never changes the heat map', () => {

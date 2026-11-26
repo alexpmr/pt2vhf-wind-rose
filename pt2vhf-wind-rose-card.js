@@ -4,7 +4,7 @@
  * comes FROM, distance from the centre = speed, colour = how much time it blew there.
  * https://github.com/alexpmr/pt2vhf-wind-rose
  */
-const VERSION = '0.11.0';
+const VERSION = '0.12.0';
 const TAG = 'pt2vhf-wind-rose-card';
 
 const STR = {
@@ -153,6 +153,26 @@ export function density(points, n = 96, sigma = 0.08) {
  * so intensity at (bearing, radius) = time the wind came from ~bearing AND reached at least
  * that radius. Smoothed across bearings with a Gaussian of sigmaDeg; wraps at north.
  */
+/**
+ * heat_motion: wraps the heat-map SVG so it sways like a windsock (more and faster with stronger wind)
+ * and flickers like a flame (more and faster the more the gusts exceed the speed). CSS only; the
+ * negative delay keeps the phase across re-renders. Strengths are rounded so small changes don't jump.
+ */
+export function heatMotion(heat, { on, speed, gust, max, now = 0 }) {
+  if (!on || !heat) return heat;
+  const m = Number(max) > 0 ? Number(max) : 1;
+  const q = (v) => Math.round(Math.min(1, Math.max(0, Number(v) || 0)) * 4) / 4;
+  const k = q((Number(speed) || 0) / m);
+  const g = q(((Number(gust) || 0) - (Number(speed) || 0)) / m * 2);
+  const sway = 1 + 5 * k;               // degrees each way
+  const pulse = +(0.02 + 0.03 * k + 0.07 * g).toFixed(3); // relative stretch of the plumes
+  const tSway = Math.round(3200 - 1800 * k);
+  const tFlick = Math.round(1800 - 700 * k - 600 * g);
+  const delay = (t) => `animation-delay:${-Math.round(now % t)}ms`;
+  return `<g class="sway" style="--wr-sway:${sway}deg;animation-duration:${tSway}ms;${delay(tSway)}">`
+    + `<g class="flick" style="--wr-pulse:${pulse};animation-duration:${tFlick}ms;${delay(tFlick)}">${heat}</g></g>`;
+}
+
 export function plume(polar, n = 96, sigmaDeg = 10, tip = 0.04) {
   const B = 360; // 1° bearing bins
   const K = 64; // radial levels
@@ -550,7 +570,7 @@ const EDITOR = {
       entity: 'Wind speed', direction_entity: 'Wind direction (degrees)', gust_entity: 'Gust', rain_entity: 'Rain',
       name: 'Name', window: 'Heat-map window', direction_offset: 'Rotate rose (display only)', max_speed: 'Max speed (0 = auto)',
       heat_mode: 'Heat-map style', heat_direction: 'Heat-map points', plume_width: 'Plume thickness', plume_fade: 'Plume tip fade',
-      smooth: 'Spot softness', pointer: 'Pointer style', pointer_color: 'Pointer colour (CSS)',
+      smooth: 'Spot softness', heat_motion: 'Animate heat map', pointer: 'Pointer style', pointer_color: 'Pointer colour (CSS)',
       show_guide: 'Arrow guide line', show_speed: 'Current speed dot', show_gust: 'Gust ring', show_rim: 'Outer circle',
       show_rings: 'Speed rings', show_spokes: 'Spokes', show_scale: 'Scale label', rings: 'Ring count',
       sectors: 'Prevailing bins', calm: 'Calm below (speed)', refresh: 'History refresh', max_width: 'Max size', tap_action: 'Tap action',
@@ -565,6 +585,7 @@ const EDITOR = {
       heat_direction: 'from: heat points to where the wind came from. to: heat is blown downwind.',
       plume_fade: 'How gradually each plume tip fades. Higher removes hard arcs; 0 = sharp tip.',
       smooth: 'Only used when the heat-map style is "spots".',
+      heat_motion: 'Sways like a windsock with the speed and flickers like a flame with the gusts. Off when the device asks for reduced motion.',
       direction_offset: 'Turns the whole rose clockwise to match how you face the screen. Values stay true.',
       show_guide: 'Only for the "arrow" pointer.',
       map: 'Tiles are downloaded from the provider for the map centre (your home by default).',
@@ -593,7 +614,7 @@ const EDITOR = {
       entity: 'Velocidade do vento', direction_entity: 'Direção do vento (graus)', gust_entity: 'Rajada', rain_entity: 'Chuva',
       name: 'Nome', window: 'Janela do mapa de calor', direction_offset: 'Girar a rosa (só exibição)', max_speed: 'Velocidade máxima (0 = auto)',
       heat_mode: 'Estilo do mapa de calor', heat_direction: 'Sentido do mapa de calor', plume_width: 'Espessura das plumas',
-      plume_fade: 'Esmaecimento da ponta', smooth: 'Suavidade das manchas', pointer: 'Estilo do ponteiro', pointer_color: 'Cor do ponteiro (CSS)',
+      plume_fade: 'Esmaecimento da ponta', smooth: 'Suavidade das manchas', heat_motion: 'Animar o mapa de calor', pointer: 'Estilo do ponteiro', pointer_color: 'Cor do ponteiro (CSS)',
       show_guide: 'Linha guia da seta', show_speed: 'Ponto da velocidade', show_gust: 'Círculo da rajada', show_rim: 'Círculo externo',
       show_rings: 'Anéis de velocidade', show_spokes: 'Linhas dos setores', show_scale: 'Número da escala', rings: 'Quantidade de anéis',
       sectors: 'Setores da predominante', calm: 'Calmaria abaixo de', refresh: 'Atualização do histórico', max_width: 'Tamanho máximo', tap_action: 'Ação ao tocar',
@@ -608,6 +629,7 @@ const EDITOR = {
       heat_direction: 'from: a mancha aponta de onde o vento veio. to: a mancha é soprada pelo vento.',
       plume_fade: 'Quanto a ponta de cada pluma se desfaz. Maior tira os arcos duros; 0 = ponta seca.',
       smooth: 'Só vale quando o estilo do mapa é "spots".',
+      heat_motion: 'Balança como uma biruta conforme a velocidade e tremula como chama conforme as rajadas. Desliga se o aparelho pedir menos movimento.',
       direction_offset: 'Gira a rosa inteira no sentido horário para combinar com a sua posição. Os valores continuam reais.',
       show_guide: 'Só para o ponteiro "arrow".',
       map: 'As imagens são baixadas do provedor para o centro do mapa (sua casa por padrão).',
@@ -652,6 +674,7 @@ export const DEFAULTS = {
   plume_width: 15,
   plume_fade: 40,
   smooth: 8,
+  heat_motion: false,
   calm: 0.5,
   max_speed: 0,
   direction_offset: 0,
@@ -742,6 +765,7 @@ export class WindRoseCard extends Base {
             { name: 'plume_width', selector: { number: { min: 2, max: 45, step: 1, mode: 'slider', unit_of_measurement: '°' } } },
             { name: 'plume_fade', selector: { number: { min: 0, max: 80, step: 1, mode: 'slider', unit_of_measurement: '%' } } },
             { name: 'smooth', selector: { number: { min: 2, max: 25, step: 1, mode: 'slider' } } },
+            { name: 'heat_motion', selector: { boolean: {} } },
           ],
         },
         {
@@ -1079,6 +1103,17 @@ export class WindRoseCard extends Base {
   .guide { stroke: var(--primary-text-color); stroke-width: 1; stroke-dasharray: 2 2; opacity: .55; }
   .now { fill: var(--primary-text-color); stroke: var(--card-background-color, #fff); stroke-width: 1.5; }
   .gust { fill: none; stroke: var(--primary-text-color); stroke-width: 1.5; stroke-dasharray: 2 1.5; }
+  .sway, .flick { transform-box: view-box; transform-origin: 0 0; animation-timing-function: ease-in-out; animation-iteration-count: infinite; }
+  .sway { animation-name: wr-sway; }
+  .flick { animation-name: wr-flick; }
+  @keyframes wr-sway { 0%, 100% { transform: rotate(calc(-1 * var(--wr-sway))); } 50% { transform: rotate(var(--wr-sway)); } }
+  @keyframes wr-flick {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    25% { transform: scale(calc(1 + var(--wr-pulse))); opacity: .85; }
+    55% { transform: scale(calc(1 - var(--wr-pulse) / 2)); opacity: 1; }
+    80% { transform: scale(calc(1 + var(--wr-pulse) / 2)); opacity: .9; }
+  }
+  @media (prefers-reduced-motion: reduce) { .sway, .flick { animation: none; } }
   ha-card.tap { cursor: pointer; }
   ha-card:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
 </style>
@@ -1088,7 +1123,7 @@ export class WindRoseCard extends Base {
     <defs>
       <clipPath id="disc"><circle r="${R}"/></clipPath>
     </defs>
-    <g clip-path="url(#disc)">${map}<g opacity="${heatOp}">${heat}</g></g>
+    <g clip-path="url(#disc)">${map}<g opacity="${heatOp}">${heatMotion(heat, { on: c.heat_motion === true, speed, gust, max, now: globalThis.performance?.now() ?? 0 })}</g></g>
     ${runway}
     <g class="grid">${grid}</g>
     ${labels}${scale}${marker}${corners}${rwyWind}${credit}

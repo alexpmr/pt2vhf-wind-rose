@@ -76,6 +76,7 @@ heat_direction: from      # from = toward where the wind came from | to = blown 
 plume_width: 15           # plume thickness (degrees)
 plume_fade: 40            # how gradually each plume tip fades (% of radius)
 smooth: 8                 # spot softness (heat_mode: spots)
+heat_motion: false        # true = heat map sways with the speed and flickers with the gusts
 calm: 0.5                 # speeds below this are left out
 max_speed: 0              # 0 = auto scale
 # Orientation
@@ -151,6 +152,7 @@ A new card added from the card picker starts with this full list (the same optio
 | `plume_width` | `15` | Plume thickness in degrees: higher merges nearby directions and hides thin streaks. |
 | `plume_fade` | `40` | How gradually each plume tip fades, in % of the radius: higher removes hard arcs (useful with sensors that report speed in steps); 0 = sharp tip. |
 | `smooth` | `8` | Spot size for `heat_mode: spots` (% of the radius). |
+| `heat_motion` | `false` | Animates the heat map: it sways like a windsock (more and faster with stronger wind) and flickers like a flame (more and faster when gusts exceed the speed). Turned off when the device asks for reduced motion. |
 | `refresh` | `60` | Seconds between history reloads. |
 | `map` | `none` | Background map under the heat map: `satellite` (Esri World Imagery), `streets` (Esri), `topo` (OpenTopoMap), `light` / `dark` (Esri Canvas), or `custom` with `map_url`. It rotates with `direction_offset`. |
 | `map_radius` | `150` | Metres from the centre to the rim. The zoom is picked from it. |

@@ -50,6 +50,12 @@
       ['heat_mode: spots', { heat_mode: 'spots' }],
       ['heat_direction: to', { heat_direction: 'to' }],
     ],
+    // heat_motion: sways with the speed, flickers with the gusts (demo gust = 7.5 vs speed 4.2).
+    motion: [
+      ['heat_motion: false', {}],
+      ['heat_motion: true', { heat_motion: true }],
+      ['true + heat_direction: to', { heat_motion: true, heat_direction: 'to' }],
+    ],
     grid: [
       ['default grid', {}],
       ['rings + spokes off', { show_rings: false, show_spokes: false }],

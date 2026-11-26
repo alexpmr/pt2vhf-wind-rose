@@ -159,6 +159,8 @@ test('heatMotion: off = untouched; on = sways with speed and flickers with gusts
   assert.ok(vars(strong).sway > vars(calm).sway, 'more wind, more sway');
   assert.ok(dur(strong)[0] < dur(calm)[0], 'more wind, faster');
   assert.ok(vars(gusty).pulse > vars(steady).pulse, 'gusts flicker more');
+  assert.ok(vars(gusty).sway > vars(strong).sway, 'side-to-side sway follows the gusts more than the speed');
+  assert.ok(dur(gusty)[0] < dur(strong)[0], 'gusts sway faster than steady strong wind');
   assert.ok(dur(gusty)[1] < dur(steady)[1], 'gusts flicker faster');
   // Re-rendering later keeps the same phase (negative delay = time already elapsed in the cycle).
   assert.match(heatMotion(svg, { on: true, speed: 0, max: 10, now: 1000 }), /animation-delay:-1000ms/);

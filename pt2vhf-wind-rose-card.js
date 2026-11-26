@@ -4,7 +4,7 @@
  * comes FROM, distance from the centre = speed, colour = how much time it blew there.
  * https://github.com/alexpmr/pt2vhf-wind-rose
  */
-const VERSION = '0.12.0';
+const VERSION = '0.12.1';
 const TAG = 'pt2vhf-wind-rose-card';
 
 const STR = {
@@ -148,15 +148,10 @@ export function density(points, n = 96, sigma = 0.08) {
 }
 
 /**
- * Radial "plume" heat map on an n×n grid over [-1, 1]² (row 0 = top), normalised to 1.
- * Each sample [r, deg] paints the whole ray from the centre out to its speed r (soft tip),
- * so intensity at (bearing, radius) = time the wind came from ~bearing AND reached at least
- * that radius. Smoothed across bearings with a Gaussian of sigmaDeg; wraps at north.
- */
-/**
- * heat_motion: wraps the heat-map SVG so it sways like a windsock (more and faster with stronger wind)
- * and flickers like a flame (more and faster the more the gusts exceed the speed). CSS only; the
- * negative delay keeps the phase across re-renders. Strengths are rounded so small changes don't jump.
+ * heat_motion: wraps the heat-map SVG so it sways side to side like a windsock and flickers like a
+ * flame. Both follow mostly the gusts (how far they exceed the speed); the speed adds a little.
+ * CSS only; the negative delay keeps the phase across re-renders. Strengths are rounded so small
+ * changes don't jump.
  */
 export function heatMotion(heat, { on, speed, gust, max, now = 0 }) {
   if (!on || !heat) return heat;
@@ -164,15 +159,21 @@ export function heatMotion(heat, { on, speed, gust, max, now = 0 }) {
   const q = (v) => Math.round(Math.min(1, Math.max(0, Number(v) || 0)) * 4) / 4;
   const k = q((Number(speed) || 0) / m);
   const g = q(((Number(gust) || 0) - (Number(speed) || 0)) / m * 2);
-  const sway = 1 + 5 * k;               // degrees each way
+  const sway = 1 + 1.5 * k + 5 * g;     // degrees each way
   const pulse = +(0.02 + 0.03 * k + 0.07 * g).toFixed(3); // relative stretch of the plumes
-  const tSway = Math.round(3200 - 1800 * k);
+  const tSway = Math.round(3200 - 500 * k - 1500 * g);
   const tFlick = Math.round(1800 - 700 * k - 600 * g);
   const delay = (t) => `animation-delay:${-Math.round(now % t)}ms`;
   return `<g class="sway" style="--wr-sway:${sway}deg;animation-duration:${tSway}ms;${delay(tSway)}">`
     + `<g class="flick" style="--wr-pulse:${pulse};animation-duration:${tFlick}ms;${delay(tFlick)}">${heat}</g></g>`;
 }
 
+/**
+ * Radial "plume" heat map on an n×n grid over [-1, 1]² (row 0 = top), normalised to 1.
+ * Each sample [r, deg] paints the whole ray from the centre out to its speed r (soft tip),
+ * so intensity at (bearing, radius) = time the wind came from ~bearing AND reached at least
+ * that radius. Smoothed across bearings with a Gaussian of sigmaDeg; wraps at north.
+ */
 export function plume(polar, n = 96, sigmaDeg = 10, tip = 0.04) {
   const B = 360; // 1° bearing bins
   const K = 64; // radial levels
@@ -585,7 +586,7 @@ const EDITOR = {
       heat_direction: 'from: heat points to where the wind came from. to: heat is blown downwind.',
       plume_fade: 'How gradually each plume tip fades. Higher removes hard arcs; 0 = sharp tip.',
       smooth: 'Only used when the heat-map style is "spots".',
-      heat_motion: 'Sways like a windsock with the speed and flickers like a flame with the gusts. Off when the device asks for reduced motion.',
+      heat_motion: 'Sways like a windsock and flickers like a flame, mostly with the gusts (the speed adds a little). Off when the device asks for reduced motion.',
       direction_offset: 'Turns the whole rose clockwise to match how you face the screen. Values stay true.',
       show_guide: 'Only for the "arrow" pointer.',
       map: 'Tiles are downloaded from the provider for the map centre (your home by default).',
@@ -629,7 +630,7 @@ const EDITOR = {
       heat_direction: 'from: a mancha aponta de onde o vento veio. to: a mancha é soprada pelo vento.',
       plume_fade: 'Quanto a ponta de cada pluma se desfaz. Maior tira os arcos duros; 0 = ponta seca.',
       smooth: 'Só vale quando o estilo do mapa é "spots".',
-      heat_motion: 'Balança como uma biruta conforme a velocidade e tremula como chama conforme as rajadas. Desliga se o aparelho pedir menos movimento.',
+      heat_motion: 'Balança como biruta e tremula como chama, principalmente com as rajadas (a velocidade soma um pouco). Desliga se o aparelho pedir menos movimento.',
       direction_offset: 'Gira a rosa inteira no sentido horário para combinar com a sua posição. Os valores continuam reais.',
       show_guide: 'Só para o ponteiro "arrow".',
       map: 'As imagens são baixadas do provedor para o centro do mapa (sua casa por padrão).',

@@ -173,7 +173,15 @@ test('heatFire: off = untouched; on = flames run downwind, lick more with gusts,
   assert.deepEqual(heatFire('', { on: true, flow: 90 }), { defs: '', svg: '' });
   const f = (o) => heatFire(svg, { on: true, flow: 135, max: 10, ...o });
   const calm = f({ speed: 0, gust: 0 });
-  assert.match(calm.defs, /<filter id="fire"[\s\S]*feTurbulence[\s\S]*stitchTiles="stitch"[\s\S]*feDisplacementMap/);
+  assert.match(calm.defs, /<filter id="fire"[\s\S]*feTurbulence[\s\S]*feDisplacementMap/);
+  // No tiling (its seam showed as a line crossing the plume); two phases cross-fade instead.
+  assert.doesNotMatch(calm.defs, /feTile|stitchTiles/);
+  assert.equal(calm.defs.match(/<feOffset/g).length, 2);
+  // The fire point stays fixed: the displacement is masked to zero at the centre and grows outward.
+  const mask = decodeURIComponent(calm.defs.match(/<feImage href="data:image\/svg\+xml,([^"]+)"/)[1]);
+  assert.match(mask, /<stop offset='0' stop-opacity='0'/);
+  assert.match(mask, /stop-opacity='1'/);
+  assert.match(calm.defs, /<feFlood flood-color="#808080"/, 'neutral grey = no displacement');
   // Flow is "up" inside a frame turned to the downwind bearing; the heat is turned back so it stays put.
   assert.match(calm.svg, /^<g transform="rotate\(135\)"><g filter="url\(#fire\)"><g transform="rotate\(-135\)"><image\/><\/g><\/g><\/g>$/);
   const scale = (d) => +d.match(/scale="([\d.]+)"/)[1];

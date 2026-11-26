@@ -4,7 +4,7 @@
  * comes FROM, distance from the centre = speed, colour = how much time it blew there.
  * https://github.com/alexpmr/pt2vhf-wind-rose
  */
-const VERSION = '0.13.0';
+const VERSION = '0.13.1';
 const TAG = 'pt2vhf-wind-rose-card';
 
 const STR = {
@@ -185,11 +185,25 @@ export function heatFire(heat, { on, flow, speed, gust, max, now = 0 }) {
   const dur = Math.round(2600 - 1500 * k - 400 * g);
   const f = Number.isFinite(Number(flow)) ? Math.round(Number(flow)) : 0;
   const T = 60;
-  const defs = `<filter id="fire" filterUnits="userSpaceOnUse" x="-90" y="-90" width="180" height="${180 + T}">`
-    + `<feTurbulence type="fractalNoise" baseFrequency="0.09 0.035" numOctaves="2" seed="7" stitchTiles="stitch" x="-90" y="-90" width="180" height="${T}"/>`
-    + `<feTile y="-90" height="${180 + T}"/>`
-    + `<feOffset result="n"><animate attributeName="dy" from="0" to="-${T}" dur="${dur}ms" begin="${-(Math.round(now % dur) / 1000)}s" repeatCount="indefinite"/></feOffset>`
-    + `<feDisplacementMap in="SourceGraphic" in2="n" scale="${scale}" xChannelSelector="R" yChannelSelector="G"/></filter>`;
+  const b = -(Math.round(now % dur) / 1000);
+  const anim = (attr, vals, begin) => `<animate attributeName="${attr}" values="${vals}" dur="${dur}ms" begin="${begin}s" repeatCount="indefinite"/>`;
+  // Smoke mask: no displacement at the centre (the fire point stays put), growing toward the rim.
+  const mask = encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 2 2'><radialGradient id='g' cx='1' cy='1' r='1' gradientUnits='userSpaceOnUse'>"
+    + "<stop offset='0' stop-opacity='0'/><stop offset='0.06' stop-opacity='0'/><stop offset='0.7' stop-opacity='1'/></radialGradient>"
+    + "<rect width='2' height='2' fill='url(#g)'/></svg>");
+  // The noise scrolls downwind ("up" here). Two copies half a cycle apart cross-fade, so each one jumps
+  // back while it is invisible: no tiles, no seam.
+  const defs = `<filter id="fire" filterUnits="userSpaceOnUse" primitiveUnits="userSpaceOnUse" x="-90" y="-90" width="180" height="${180 + T}" color-interpolation-filters="sRGB">`
+    + `<feTurbulence type="fractalNoise" baseFrequency="0.09 0.035" numOctaves="2" seed="7"/>`
+    + `<feColorMatrix values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 0 1" result="t"/>`
+    + `<feOffset in="t" result="a">${anim('dy', `0;-${T}`, b)}</feOffset>`
+    + `<feOffset in="t" result="b">${anim('dy', `0;-${T}`, +(b - dur / 2000).toFixed(3))}</feOffset>`
+    + `<feComposite in="a" in2="b" operator="arithmetic" k2="0" k3="1" result="n">${anim('k2', '0;1;0', b)}${anim('k3', '1;0;1', b)}</feComposite>`
+    + `<feImage href="data:image/svg+xml,${mask}" x="-90" y="-90" width="180" height="180" preserveAspectRatio="none" result="m"/>`
+    + `<feComposite in="n" in2="m" operator="in" result="nm"/>`
+    + `<feFlood flood-color="#808080"/>`
+    + `<feComposite in="nm" operator="over" result="d"/>`
+    + `<feDisplacementMap in="SourceGraphic" in2="d" scale="${scale}" xChannelSelector="R" yChannelSelector="G"/></filter>`;
   return { defs, svg: `<g transform="rotate(${f})"><g filter="url(#fire)"><g transform="rotate(${-f})">${heat}</g></g></g>` };
 }
 
